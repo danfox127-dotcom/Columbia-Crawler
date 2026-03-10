@@ -160,7 +160,7 @@ with tab4:
 # ==========================================
 with tab5:
     st.header("🔗 Link Up Protocol Engine")
-    st.markdown("Safely interlink medical copy without altering existing text. Enforces strict domain siloing and validates 200 OK status.")
+    st.markdown("Safely interlink medical copy. The Vagelos database is now fully integrated for instant URL lookups.")
     
     def validate_url(url):
         try:
@@ -177,30 +177,38 @@ with tab5:
             "Link Up Network (Whitelisted Cross-Linking)"
         ])
         
-        # CSV Integration for URL Lookup
-        reference_csv = st.file_uploader("Upload Site Database (CSV) for URL Auto-Lookup:", type=["csv"])
+        db_choice = st.selectbox("Select Built-in Database:", [
+            "None (Manual URL Entry)", 
+            "Vagelos Master Database"
+        ])
         
-        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., IgA Nephropathy")
+        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., Ali Gharavi")
         
         target_link = ""
-        # Auto-Lookup Logic
-        if reference_csv and keyword:
+        
+        # Built-in Auto-Lookup Logic
+        if db_choice == "Vagelos Master Database" and keyword:
             try:
-                ref_df = pd.read_csv(reference_csv, low_memory=False)
-                # Search for the keyword in H1s or Titles
+                # Reads the file directly from your GitHub repository
+                ref_df = pd.read_csv('Vagelos CSV.csv', low_memory=False)
                 search_col = 'H1-1' if 'H1-1' in ref_df.columns else 'Title 1'
                 
                 if search_col in ref_df.columns and 'Address' in ref_df.columns:
+                    # Strip out the broken /esi/ URLs from the search results automatically
+                    ref_df = ref_df[~ref_df['Address'].str.contains('/esi/', na=False, case=False)]
+                    
                     matches = ref_df[ref_df[search_col].str.contains(keyword, case=False, na=False)]
                     if not matches.empty:
-                        st.success(f"🔍 Found {len(matches)} potential URL matches in the CSV!")
-                        target_link = st.selectbox("Select the correct URL from database:", matches['Address'].tolist())
+                        st.success(f"🔍 Found {len(matches)} safe URL matches in the Vagelos database!")
+                        target_link = st.selectbox("Select the correct URL:", matches['Address'].tolist())
                     else:
                         st.warning("No exact matches found in the CSV. You can enter the URL manually below.")
+            except FileNotFoundError:
+                st.error("🚨 Database missing: Ensure 'Vagelos CSV.csv' is uploaded to your GitHub repository.")
             except Exception as e:
-                st.error("Error reading CSV database.")
+                st.error(f"Error reading CSV database: {e}")
         
-        # Manual Override if CSV isn't used or match isn't found
+        # Manual Override
         if not target_link:
             target_link = st.text_input("Target URL (Manual Entry):", placeholder="https://...")
             
@@ -212,7 +220,6 @@ with tab5:
     if apply_btn and keyword and target_link and draft_text:
         with st.spinner("Validating URL architecture and applying protocol..."):
             
-            # Domain Siloing Validation
             is_valid_domain = True
             error_msg = ""
             
@@ -226,4 +233,16 @@ with tab5:
                 is_valid_domain = False
                 error_msg = "⚠️ Error: Target URL is outside the whitelisted Columbia Network."
 
-            # Execution
+            if not is_valid_domain:
+                st.error(error_msg)
+            elif not validate_url(target_link):
+                st.error("🚨 Error: The target URL is broken (404) or unreachable. Protocol aborted.")
+            else:
+                pattern = r'(?i)\b({})\b'.format(re.escape(keyword))
+                linked_text = re.sub(pattern, f'<a href="{target_link}">\g<1></a>', draft_text, count=1)
+                
+                if linked_text == draft_text:
+                    st.warning(f"⚠️ Keyword '{keyword}' not found in the provided text.")
+                else:
+                    st.success("✅ Link safely applied! Original formatting preserved.")
+                    st.code(linked_text, language="html")
