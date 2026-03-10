@@ -2,118 +2,187 @@ import streamlit as st
 import advertools as adv
 import pandas as pd
 import datetime
+import re
+import requests
 from urllib.parse import urlparse
 import os
+from collections import Counter
 
-# 1. Page Configuration & UI Setup
-st.set_page_config(page_title="Healthcare SEO Auditor", page_icon="🏥", layout="wide")
+# --- Page Configuration ---
+st.set_page_config(page_title="Healthcare SEO Command Center", page_icon="🏥", layout="wide")
+st.title("🏥 Healthcare SEO Strategist Command Center")
+st.markdown("An enterprise-grade, multi-tool dashboard for large-scale medical Information Architecture and E-E-A-T analysis.")
 
-st.title("🏥 Healthcare SEO Strategist Dashboard")
-st.markdown("""
-**Objective:** Audit medical websites for **E-E-A-T signals**, thin content, and strict meta description frameworks.
-* **Meta Descriptions:** Enforcing the *Empathy + Authority + Action* framework (140-150 chars).
-* **Thin Content:** Flagging pages < 300 words that require physician quotes or medical review citations.
-""")
+# --- Tab Setup ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🕷️ Live Crawler", 
+    "🗺️ Sitemap Auditor", 
+    "🗂️ URL Structure Mapper", 
+    "🧠 N-Gram Analyzer",
+    "🔗 Link Up Protocol"
+])
 
-st.divider()
-
-# 2. Sidebar Inputs
-with st.sidebar:
-    st.header("Crawl Parameters")
-    target_url = st.text_input("Target URL:", value="columbianephrology.org")
-    max_urls = st.number_input("Max URLs to crawl (0 = unlimited):", min_value=0, value=50, step=10)
-    run_audit = st.button("🚀 Run SEO Audit", type="primary")
-
-# 3. Execution Logic
-if run_audit:
-    # Ensure URL is properly formatted
-    if not target_url.startswith("http://") and not target_url.startswith("https://"):
-        target_url = "https://" + target_url
-
-    domain = urlparse(target_url).netloc.replace("www.", "")
-    output_file = f"{domain}_crawl.jl"
-
-    # Remove previous crawl file if it exists to prevent appending old data
-    if os.path.exists(output_file):
-        os.remove(output_file)
-
-    custom_settings = {
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'LOG_LEVEL': 'WARNING'
-    }
+# ==========================================
+# TAB 1: LIVE CRAWLER (Screaming Frog Alternative)
+# ==========================================
+with tab1:
+    st.header("🕷️ Live SEO Crawler & E-E-A-T Auditor")
+    st.markdown("Crawl a live site to grade Meta Descriptions (140-150 chars) and flag Thin Content (<300 words).")
     
-    if max_urls > 0:
-        custom_settings['CLOSESPIDER_PAGECOUNT'] = max_urls
+    colA, colB = st.columns([1, 2])
+    with colA:
+        target_url = st.text_input("Target Domain:", value="https://www.columbianephrology.org")
+        max_urls = st.number_input("Max URLs to crawl (0 = unlimited):", min_value=0, value=50, step=10)
+        run_audit = st.button("🚀 Run Live Crawl", type="primary")
 
-    with st.spinner(f"Crawling {domain}... Please wait, this takes a moment."):
+    if run_audit:
+        if not target_url.startswith("http"): target_url = "https://" + target_url.replace("www.", "")
+        domain = urlparse(target_url).netloc
+        output_file = f"{domain}_crawl.jl"
+
+        if os.path.exists(output_file): os.remove(output_file)
+
+        custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 2, 'LOG_LEVEL': 'WARNING'}
+        if max_urls > 0: custom_settings['CLOSESPIDER_PAGECOUNT'] = max_urls
+
+        with st.spinner(f"Crawling {domain}... Please wait."):
+            try:
+                adv.crawl(target_url, output_file, follow_links=True, allowed_domains=[domain], custom_settings=custom_settings)
+                df = pd.read_json(output_file, lines=True)
+                
+                df_html = df[df.get('status', pd.Series([200]*len(df))) == 200].copy()
+                
+                if 'body_text' in df_html.columns:
+                    df_html['word_count'] = df_html['body_text'].fillna('').apply(lambda x: len(str(x).split()))
+                    df_html['thin_content_flag'] = df_html['word_count'].apply(lambda x: '🚨 Yes (<300 words)' if x < 300 else '✅ No')
+                
+                if 'meta_desc' in df_html.columns:
+                    df_html['meta_desc_clean'] = df_html['meta_desc'].apply(lambda x: x[0] if isinstance(x, list) else str(x))
+                    df_html['meta_desc_length'] = df_html['meta_desc_clean'].str.len()
+                    df_html['meta_desc_status'] = df_html['meta_desc_length'].apply(
+                        lambda l: "❌ Missing" if pd.isna(l) or l==0 else ("⚠️ Too Short" if l<140 else ("⚠️ Too Long" if l>150 else "✅ Optimized"))
+                    )
+
+                export_cols = ['url', 'title', 'meta_desc_clean', 'meta_desc_length', 'meta_desc_status', 'word_count', 'thin_content_flag']
+                final_df = df_html[[c for c in export_cols if c in df_html.columns]]
+
+                st.success(f"Audit Complete! Processed {len(final_df)} pages.")
+                st.dataframe(final_df, use_container_width=True)
+                st.download_button("📥 Download Audit (CSV)", data=final_df.to_csv(index=False).encode('utf-8'), file_name=f"{domain}_SEO_Audit.csv", mime="text/csv")
+            except Exception as e:
+                st.error(f"Crawl Failed: {e}")
+
+# ==========================================
+# TAB 2: SITEMAP AUDITOR
+# ==========================================
+with tab2:
+    st.header("🗺️ XML Sitemap Auditor")
+    st.markdown("Instantly parse massive sitemaps to check indexability signals and structure.")
+    
+    sitemap_url = st.text_input("XML Sitemap URL:", placeholder="https://www.columbiadoctors.org/sitemap.xml")
+    run_sitemap = st.button("📊 Analyze Sitemap", type="primary")
+    
+    if run_sitemap and sitemap_url:
+        with st.spinner("Downloading and parsing sitemap network..."):
+            try:
+                sitemap_df = adv.sitemap_to_df(sitemap_url)
+                st.success(f"Successfully extracted {len(sitemap_df)} URLs.")
+                
+                col1, col2 = st.columns(2)
+                col1.metric("Total URLs Found", len(sitemap_df))
+                if 'lastmod' in sitemap_df.columns:
+                    missing_dates = sitemap_df['lastmod'].isna().sum()
+                    col2.metric("Missing LastMod Dates", missing_dates, delta="Flag for SEO Fix" if missing_dates > 0 else "Optimized", delta_color="inverse")
+                
+                st.dataframe(sitemap_df.head(100), use_container_width=True)
+                st.download_button("📥 Download Sitemap Data", data=sitemap_df.to_csv(index=False).encode('utf-8'), file_name="sitemap_audit.csv", mime="text/csv")
+            except Exception as e:
+                st.error(f"Failed to parse sitemap. Ensure it is a valid XML URL. Error: {e}")
+
+# ==========================================
+# TAB 3: URL STRUCTURE MAPPER
+# ==========================================
+with tab3:
+    st.header("🗂️ URL Structure & Silo Mapper")
+    st.markdown("Paste a list of URLs to instantly dissect their folder structure and hierarchy.")
+    
+    url_input = st.text_area("Paste URLs (One per line):", height=150)
+    run_urls = st.button("🗺️ Map Architecture", type="primary")
+    
+    if run_urls and url_input:
+        urls = [u.strip() for u in url_input.split('\n') if u.strip()]
+        with st.spinner("Mapping URL architecture..."):
+            url_df = adv.url_to_df(urls)
+            st.success("Architecture Mapped!")
+            
+            # Show directory breakdown if available
+            dir_cols = [c for c in url_df.columns if c.startswith('dir_')]
+            if dir_cols:
+                st.subheader("Top Level Directories (Silos)")
+                st.bar_chart(url_df['dir_1'].value_counts().head(10))
+            
+            st.dataframe(url_df, use_container_width=True)
+
+# ==========================================
+# TAB 4: N-GRAM & CANNIBALIZATION ANALYZER
+# ==========================================
+with tab4:
+    st.header("🧠 N-Gram & Keyword Cannibalization Analyzer")
+    st.markdown("Upload a crawl CSV (like Screaming Frog) to find overused phrases in H1s or Titles.")
+    
+    uploaded_file = st.file_uploader("Upload CSV Dump", type=["csv"])
+    if uploaded_file:
+        df_text = pd.read_csv(uploaded_file, low_memory=False)
+        st.write(f"Loaded {len(df_text)} rows.")
+        
+        text_col = st.selectbox("Select Column to Analyze (e.g., Title 1, H1-1):", df_text.columns)
+        n_gram_size = st.slider("Phrase Length (Words):", 1, 4, 2)
+        run_ngram = st.button("🔍 Extract Phrases", type="primary")
+        
+        if run_ngram:
+            with st.spinner("Analyzing semantic patterns..."):
+                text_data = df_text[text_col].dropna().astype(str).tolist()
+                
+                # Simple N-Gram extraction using advertools word_frequency
+                word_freq = adv.word_frequency(text_data, phrase_len=n_gram_size)
+                
+                st.success("Analysis Complete. Watch out for overlapping concepts below.")
+                st.dataframe(word_freq.head(50), use_container_width=True)
+
+# ==========================================
+# TAB 5: LINK UP PROTOCOL ENGINE
+# ==========================================
+with tab5:
+    st.header("🔗 Link Up Protocol Engine")
+    st.markdown("Safely interlink medical copy without altering existing text. Validates 200 OK status.")
+    
+    def validate_url(url):
         try:
-            # Run the advertools crawler
-            adv.crawl(target_url, output_file, follow_links=True, allowed_domains=[domain], custom_settings=custom_settings)
-            
-            # Load and clean data
-            df = pd.read_json(output_file, lines=True)
-            
-            # Filter for 200 OK HTML pages
-            df_html = df.copy()
-            if 'status' in df_html.columns:
-                df_html = df_html[df_html['status'] == 200]
-            if 'resp_headers_content-type' in df_html.columns:
-                df_html = df_html[df_html['resp_headers_content-type'].str.contains('text/html', na=False, case=False)]
+            return requests.head(url, allow_redirects=True, timeout=5).status_code == 200
+        except: return False
 
-            # A. Thin Content Audit
-            if 'body_text' in df_html.columns:
-                df_html['word_count'] = df_html['body_text'].fillna('').apply(lambda x: len(str(x).split()))
-                df_html['thin_content_flag'] = df_html['word_count'].apply(lambda x: '🚨 Yes (<300 words)' if x < 300 else '✅ No')
+    col1, col2 = st.columns(2)
+    with col1:
+        protocol_choice = st.selectbox("Select Workflow:", ["Link Up (ColumbiaDoctors)", "Link Up Network (Whitelisted)"])
+        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., adolescent idiopathic scoliosis")
+        target_link = st.text_input("Target URL:", placeholder="https://www.columbiadoctors.org/...")
+        
+    with col2:
+        draft_text = st.text_area("Paste Draft Paragraph Here:", height=150)
+        apply_btn = st.button("🔗 Apply Protocol", type="primary")
+
+    if apply_btn and keyword and target_link and draft_text:
+        with st.spinner("Validating URL and applying protocol..."):
+            if "Network" not in protocol_choice and "columbiadoctors.org" not in target_link:
+                st.error("⚠️ Error: This protocol strictly requires a ColumbiaDoctors.org link.")
+            elif not validate_url(target_link):
+                st.error("🚨 Error: The target URL is broken (404) or unreachable.")
             else:
-                df_html['word_count'] = 0
-                df_html['thin_content_flag'] = "Unknown"
-
-            # B. Meta Description Length Audit
-            if 'meta_desc' in df_html.columns:
-                df_html['meta_desc_clean'] = df_html['meta_desc'].apply(lambda x: x[0] if isinstance(x, list) else str(x))
-                df_html['meta_desc_length'] = df_html['meta_desc_clean'].str.len()
-
-                def check_meta_length(length):
-                    if pd.isna(length) or length == 0:
-                        return "❌ Missing"
-                    elif length < 140:
-                        return "⚠️ Too Short (<140)"
-                    elif length > 150:
-                        return "⚠️ Too Long (>150)"
-                    else:
-                        return "✅ Optimized (140-150)"
-
-                df_html['meta_desc_status'] = df_html['meta_desc_length'].apply(check_meta_length)
-            else:
-                df_html['meta_desc_clean'] = "None Found"
-                df_html['meta_desc_length'] = 0
-                df_html['meta_desc_status'] = "❌ Missing"
-
-            # Clean output for the dashboard
-            export_cols = ['url', 'title', 'meta_desc_clean', 'meta_desc_length', 'meta_desc_status', 'word_count', 'thin_content_flag']
-            export_cols = [col for col in export_cols if col in df_html.columns]
-            final_df = df_html[export_cols]
-
-            # 4. Display Results in UI
-            st.success(f"Audit Complete! Processed {len(final_df)} pages.")
-            
-            # Show Metrics
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Pages Audited", len(final_df))
-            col2.metric("Thin Content Issues", len(final_df[final_df['thin_content_flag'].str.contains('Yes')]))
-            col3.metric("Meta Desc Issues", len(final_df[~final_df['meta_desc_status'].str.contains('✅')]))
-
-            st.dataframe(final_df, use_container_width=True)
-
-            # 5. Provide CSV Download
-            csv = final_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Strategic Audit (CSV)",
-                data=csv,
-                file_name=f"{domain}_SEO_Audit_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                type="primary"
-            )
-
-        except Exception as e:
-            st.error(f"Crawl Failed. Ensure the URL is accessible. Error detail: {e}")
+                pattern = r'(?i)\b({})\b'.format(re.escape(keyword))
+                linked_text = re.sub(pattern, f'<a href="{target_link}">\g<1></a>', draft_text, count=1)
+                
+                if linked_text == draft_text:
+                    st.warning(f"⚠️ Keyword '{keyword}' not found in the provided text.")
+                else:
+                    st.success("✅ Link successfully applied to the first exact match!")
+                    st.code(linked_text, language="html")
