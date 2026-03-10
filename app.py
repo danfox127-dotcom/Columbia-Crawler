@@ -35,12 +35,18 @@ with tab1:
         max_urls = st.number_input("Max URLs to crawl (0 = unlimited):", min_value=0, value=50, step=10)
         run_audit = st.button("🚀 Run Live Crawl", type="primary")
 
-    if run_audit:
-        if not target_url.startswith("http"): target_url = "https://" + target_url.replace("www.", "")
-        domain = urlparse(target_url).netloc
+if run_audit:
+        # 1. Ensure the URL has a protocol
+        if not target_url.startswith("http"): 
+            target_url = "https://" + target_url
+            
+        # 2. Extract domain and strictly strip "www." to prevent Scrapy from blocking redirects
+        domain = urlparse(target_url).netloc.replace("www.", "")
+        
         output_file = f"{domain}_crawl.jl"
 
-        if os.path.exists(output_file): os.remove(output_file)
+        if os.path.exists(output_file): 
+            os.remove(output_file)
 
         custom_settings = {'CONCURRENT_REQUESTS_PER_DOMAIN': 2, 'LOG_LEVEL': 'WARNING'}
         if max_urls > 0: custom_settings['CLOSESPIDER_PAGECOUNT'] = max_urls
