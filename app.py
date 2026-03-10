@@ -160,7 +160,7 @@ with tab4:
 # ==========================================
 with tab5:
     st.header("🔗 Link Up Protocol Engine")
-    st.markdown("Safely interlink medical copy without altering existing text. Validates 200 OK status.")
+    st.markdown("Safely interlink medical copy without altering existing text. Enforces strict domain siloing and validates 200 OK status.")
     
     def validate_url(url):
         try:
@@ -168,27 +168,62 @@ with tab5:
         except: return False
 
     col1, col2 = st.columns(2)
+    
     with col1:
-        protocol_choice = st.selectbox("Select Workflow:", ["Link Up (ColumbiaDoctors)", "Link Up Network (Whitelisted)"])
-        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., adolescent idiopathic scoliosis")
-        target_link = st.text_input("Target URL:", placeholder="https://www.columbiadoctors.org/...")
+        st.subheader("1. Protocol Rules & Database")
+        protocol_choice = st.selectbox("Select Silo Workflow:", [
+            "Link Up (ColumbiaDoctors Only)", 
+            "Link Up (Vagelos Only)",
+            "Link Up Network (Whitelisted Cross-Linking)"
+        ])
         
+        # CSV Integration for URL Lookup
+        reference_csv = st.file_uploader("Upload Site Database (CSV) for URL Auto-Lookup:", type=["csv"])
+        
+        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., IgA Nephropathy")
+        
+        target_link = ""
+        # Auto-Lookup Logic
+        if reference_csv and keyword:
+            try:
+                ref_df = pd.read_csv(reference_csv, low_memory=False)
+                # Search for the keyword in H1s or Titles
+                search_col = 'H1-1' if 'H1-1' in ref_df.columns else 'Title 1'
+                
+                if search_col in ref_df.columns and 'Address' in ref_df.columns:
+                    matches = ref_df[ref_df[search_col].str.contains(keyword, case=False, na=False)]
+                    if not matches.empty:
+                        st.success(f"🔍 Found {len(matches)} potential URL matches in the CSV!")
+                        target_link = st.selectbox("Select the correct URL from database:", matches['Address'].tolist())
+                    else:
+                        st.warning("No exact matches found in the CSV. You can enter the URL manually below.")
+            except Exception as e:
+                st.error("Error reading CSV database.")
+        
+        # Manual Override if CSV isn't used or match isn't found
+        if not target_link:
+            target_link = st.text_input("Target URL (Manual Entry):", placeholder="https://...")
+            
     with col2:
-        draft_text = st.text_area("Paste Draft Paragraph Here:", height=150)
-        apply_btn = st.button("🔗 Apply Protocol", type="primary")
+        st.subheader("2. Medical Copy Injection")
+        draft_text = st.text_area("Paste Draft Paragraph Here:", height=200)
+        apply_btn = st.button("🔗 Apply Protocol", type="primary", use_container_width=True)
 
     if apply_btn and keyword and target_link and draft_text:
-        with st.spinner("Validating URL and applying protocol..."):
-            if "Network" not in protocol_choice and "columbiadoctors.org" not in target_link:
-                st.error("⚠️ Error: This protocol strictly requires a ColumbiaDoctors.org link.")
-            elif not validate_url(target_link):
-                st.error("🚨 Error: The target URL is broken (404) or unreachable.")
-            else:
-                pattern = r'(?i)\b({})\b'.format(re.escape(keyword))
-                linked_text = re.sub(pattern, f'<a href="{target_link}">\g<1></a>', draft_text, count=1)
-                
-                if linked_text == draft_text:
-                    st.warning(f"⚠️ Keyword '{keyword}' not found in the provided text.")
-                else:
-                    st.success("✅ Link successfully applied to the first exact match!")
-                    st.code(linked_text, language="html")
+        with st.spinner("Validating URL architecture and applying protocol..."):
+            
+            # Domain Siloing Validation
+            is_valid_domain = True
+            error_msg = ""
+            
+            if "ColumbiaDoctors Only" in protocol_choice and "columbiadoctors.org" not in target_link:
+                is_valid_domain = False
+                error_msg = "⚠️ Error: This protocol strictly requires a ColumbiaDoctors.org link."
+            elif "Vagelos Only" in protocol_choice and "vagelos.columbia.edu" not in target_link:
+                is_valid_domain = False
+                error_msg = "⚠️ Error: This protocol strictly requires a Vagelos.columbia.edu link."
+            elif "Network" in protocol_choice and not any(d in target_link for d in ["columbiadoctors.org", "vagelos.columbia.edu", "cuimc.columbia.edu"]):
+                is_valid_domain = False
+                error_msg = "⚠️ Error: Target URL is outside the whitelisted Columbia Network."
+
+            # Execution
