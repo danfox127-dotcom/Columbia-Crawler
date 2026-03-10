@@ -156,93 +156,80 @@ with tab4:
                 st.dataframe(word_freq.head(50), use_container_width=True)
 
 # ==========================================
-# TAB 5: LINK UP PROTOCOL ENGINE
+# TAB 5: CONTEXTUAL AUTO-LINKER
 # ==========================================
 with tab5:
-    st.header("🔗 Link Up Protocol Engine")
-    st.markdown("Safely interlink medical copy. The Vagelos database is now fully integrated for instant URL lookups.")
-    
-    def validate_url(url):
-        try:
-            return requests.head(url, allow_redirects=True, timeout=5).status_code == 200
-        except: return False
+    st.header("🔗 Contextual Auto-Linker")
+    st.markdown("Paste your copy below. The tool will scan your text against the Vagelos Database to find and validate internal linking opportunities.")
 
+    draft_text = st.text_area("Paste Draft Copy Here:", height=250)
+    
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.subheader("1. Protocol Rules & Database")
-        protocol_choice = st.selectbox("Select Silo Workflow:", [
-            "Link Up (ColumbiaDoctors Only)", 
-            "Link Up (Vagelos Only)",
-            "Link Up Network (Whitelisted Cross-Linking)"
-        ])
-        
-        db_choice = st.selectbox("Select Built-in Database:", [
-            "None (Manual URL Entry)", 
-            "Vagelos Master Database"
-        ])
-        
-        keyword = st.text_input("Target Keyword (Exact match):", placeholder="e.g., Ali Gharavi")
-        
-        target_link = ""
-        
-        # Built-in Auto-Lookup Logic
-        if db_choice == "Vagelos Master Database" and keyword:
-            try:
-                # Reads the file directly from your GitHub repository
-                ref_df = pd.read_csv('Vagelos CSV.csv', low_memory=False)
-                search_col = 'H1-1' if 'H1-1' in ref_df.columns else 'Title 1'
-                
-                if search_col in ref_df.columns and 'Address' in ref_df.columns:
-                    # Strip out the broken /esi/ URLs from the search results automatically
-                    ref_df = ref_df[~ref_df['Address'].str.contains('/esi/', na=False, case=False)]
-                    
-                    matches = ref_df[ref_df[search_col].str.contains(keyword, case=False, na=False)]
-                    if not matches.empty:
-                        st.success(f"🔍 Found {len(matches)} safe URL matches in the Vagelos database!")
-                        target_link = st.selectbox("Select the correct URL:", matches['Address'].tolist())
-                    else:
-                        st.warning("No exact matches found in the CSV. You can enter the URL manually below.")
-            except FileNotFoundError:
-                st.error("🚨 Database missing: Ensure 'Vagelos CSV.csv' is uploaded to your GitHub repository.")
-            except Exception as e:
-                st.error(f"Error reading CSV database: {e}")
-        
-        # Manual Override
-        if not target_link:
-            target_link = st.text_input("Target URL (Manual Entry):", placeholder="https://...")
-            
+        manual_keyword = st.text_input("Manual Keyword Override (Optional):")
     with col2:
-        st.subheader("2. Medical Copy Injection")
-        draft_text = st.text_area("Paste Draft Paragraph Here:", height=200)
-        apply_btn = st.button("🔗 Apply Protocol", type="primary", use_container_width=True)
+        manual_url = st.text_input("Manual URL Override (Optional):")
 
-    if apply_btn and keyword and target_link and draft_text:
-        with st.spinner("Validating URL architecture and applying protocol..."):
-            
-            is_valid_domain = True
-            error_msg = ""
-            
-            if "ColumbiaDoctors Only" in protocol_choice and "columbiadoctors.org" not in target_link:
-                is_valid_domain = False
-                error_msg = "⚠️ Error: This protocol strictly requires a ColumbiaDoctors.org link."
-            elif "Vagelos Only" in protocol_choice and "vagelos.columbia.edu" not in target_link:
-                is_valid_domain = False
-                error_msg = "⚠️ Error: This protocol strictly requires a Vagelos.columbia.edu link."
-            elif "Network" in protocol_choice and not any(d in target_link for d in ["columbiadoctors.org", "vagelos.columbia.edu", "cuimc.columbia.edu"]):
-                is_valid_domain = False
-                error_msg = "⚠️ Error: Target URL is outside the whitelisted Columbia Network."
+    if st.button("🚀 Scan and Link Content", type="primary"):
+        if not draft_text:
+            st.error("Please paste some text to scan.")
+        else:
+            with st.spinner("Scanning database for matches and validating live status..."):
+                try:
+                    # 1. Load Database
+                    ref_df = pd.read_csv('Vagelos CSV.csv', low_memory=False)
+                    # Filter out ESI noise and non-indexable junk
+                    ref_df = ref_df[~ref_df['Address'].str.contains('/esi/', na=False)]
+                    ref_df = ref_df[ref_df['Status Code'].astype(str) == '200']
+                    
+                    # 2. Identify Entities to Link
+                    # We look for H1s from the CSV that exist inside your draft text
+                    potential_matches = []
+                    
+                    # Search logic: Find H1s/Titles from the CSV that are present in the text
+                    # We prioritize longer strings first to avoid partial matches
+                    site_entities = ref_df[['Address', 'H1-1']].dropna()
+                    site_entities = site_entities[site_entities['H1-1'].str.len() > 3]
+                    
+                    found_links = []
+                    processed_text = draft_text
 
-            if not is_valid_domain:
-                st.error(error_msg)
-            elif not validate_url(target_link):
-                st.error("🚨 Error: The target URL is broken (404) or unreachable. Protocol aborted.")
-            else:
-                pattern = r'(?i)\b({})\b'.format(re.escape(keyword))
-                linked_text = re.sub(pattern, f'<a href="{target_link}">\g<1></a>', draft_text, count=1)
-                
-                if linked_text == draft_text:
-                    st.warning(f"⚠️ Keyword '{keyword}' not found in the provided text.")
-                else:
-                    st.success("✅ Link safely applied! Original formatting preserved.")
-                    st.code(linked_text, language="html")
+                    for _, row in site_entities.iterrows():
+                        entity = row['H1-1'].strip()
+                        url = row['Address']
+                        
+                        # Use regex for exact phrase match
+                        pattern = r'(?i)\b({})\b'.format(re.escape(entity))
+                        
+                        if re.search(pattern, processed_text):
+                            # Verify if it's still live
+                            try:
+                                res = requests.head(url, timeout=3)
+                                if res.status_code == 200:
+                                    # Apply the link to the first instance
+                                    processed_text = re.sub(pattern, f'<a href="{url}">\g<1></a>', processed_text, count=1)
+                                    found_links.append(f"Linked: **{entity}** to {url}")
+                            except:
+                                continue
+
+                    # 3. Handle Manual Overrides if provided
+                    if manual_keyword and manual_url:
+                        pattern = r'(?i)\b({})\b'.format(re.escape(manual_keyword))
+                        processed_text = re.sub(pattern, f'<a href="{manual_url}">\g<1></a>', processed_text, count=1)
+                        found_links.append(f"Manual Link: **{manual_keyword}** applied.")
+
+                    # 4. Results
+                    st.success(f"Scan complete. Applied {len(found_links)} internal links.")
+                    for link in found_links:
+                        st.write(link)
+                    
+                    st.markdown("### Final HTML Output")
+                    st.code(processed_text, language="html")
+                    
+                    st.markdown("### Preview")
+                    st.markdown(processed_text, unsafe_allow_html=True)
+                    
+                except FileNotFoundError:
+                    st.error("Missing 'Vagelos CSV.csv' in GitHub repo.")
+                except Exception as e:
+                    st.error(f"Analysis Error: {e}")
