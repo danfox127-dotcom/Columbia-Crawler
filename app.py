@@ -122,15 +122,92 @@ with tab2:
                 st.error(f"Failed to analyze sitemap. Error: {e}")
 
 # ==========================================
-# TAB 3: URL STRUCTURE MAPPER
+# TAB 3: URL STRUCTURE MAPPER & STRATEGIST ENGINE
 # ==========================================
 with tab3:
-    st.header("🗂️ URL Structure Mapper")
-    url_input = st.text_area("Paste URLs:")
-    if st.button("🗺️ Map"):
+    st.header("🗂️ URL Structure Mapper & Strategist Engine")
+    st.markdown("Paste a list of URLs to instantly dissect their folder structure, identify deep silos, and catch formatting errors.")
+    
+    url_input = st.text_area("Paste URLs (One per line):", height=150, placeholder="https://www.columbiadoctors.org/specialties/cardiology\nhttps://www.columbiadoctors.org/specialties/neurology")
+    
+    if st.button("🗺️ Map Architecture & Generate Strategy", type="primary"):
         urls = [u.strip() for u in url_input.split('\n') if u.strip()]
-        url_df = adv.url_to_df(urls)
-        st.dataframe(url_df)
+        if not urls:
+            st.error("Please paste at least one URL.")
+        else:
+            with st.spinner("Mapping URL architecture and running diagnostics..."):
+                try:
+                    url_df = adv.url_to_df(urls)
+                    st.success(f"✅ Architecture Mapped for {len(urls)} URLs. Generating Strategic Report...")
+                    
+                    st.subheader("🧠 Automated Diagnostic Report")
+                    
+                    # Diagnostic 1: Site Depth & Siloing
+                    with st.expander("🚨 Diagnostic 1: Architecture Depth & Siloing", expanded=True):
+                        st.markdown("**Severity:** Medium | **Impact:** Crawlability & Link Equity Flow")
+                        
+                        # Top Silos
+                        if 'dir_1' in url_df.columns:
+                            top_silos = url_df['dir_1'].value_counts().head(5)
+                            st.write("**Top Level Folders (Silos):**")
+                            st.bar_chart(top_silos)
+                            st.markdown("""
+                            **Strategist Note:** Ensure these top folders align with your primary service lines. If a random or generic folder dominates, your internal link equity is being misdirected.
+                            """)
+                        
+                        # Depth Check (Flag URLs that are 4+ folders deep)
+                        deep_urls = pd.DataFrame()
+                        if 'dir_4' in url_df.columns: 
+                            deep_urls = url_df[url_df['dir_4'].notna() & (url_df['dir_4'] != '')]
+                        
+                        if not deep_urls.empty:
+                            st.warning(f"**Found {len(deep_urls)} URLs buried 4+ directories deep.**")
+                            st.markdown("""
+                            **Strategist Action Plan (For IA / Content Team):**
+                            A flat architecture is better for SEO. Pages buried 4+ clicks deep are rarely crawled by Google and receive very little 'link equity'. Consider flattening these URLs or linking to them directly from the homepage/primary hub.
+                            """)
+                            st.dataframe(deep_urls[['url']].head(5), use_container_width=True)
+                        else:
+                            st.success("✅ Architecture depth looks good. Pages are not buried too deeply.")
+
+                    # Diagnostic 2: URL Formatting & Best Practices
+                    with st.expander("🚨 Diagnostic 2: URL Formatting & Parameter Risks", expanded=True):
+                        st.markdown("**Severity:** Medium | **Impact:** Duplicate Content & UX")
+                        
+                        issues_found = False
+                        
+                        # Check for Uppercase Letters
+                        uppercase_urls = url_df[url_df['url'].str.contains(r'[A-Z]', regex=True, na=False)]
+                        if not uppercase_urls.empty:
+                            issues_found = True
+                            st.warning(f"**Found {len(uppercase_urls)} URLs containing uppercase letters.**")
+                            st.markdown("*(Rule: URLs should always be 100% lowercase to prevent Linux servers from creating duplicate pages like `/Cardiology` vs `/cardiology`.)*")
+                        
+                        # Check for Underscores
+                        underscore_urls = url_df[url_df['url'].str.contains(r'_', regex=True, na=False)]
+                        if not underscore_urls.empty:
+                            issues_found = True
+                            st.warning(f"**Found {len(underscore_urls)} URLs using underscores instead of hyphens.**")
+                            st.markdown("*(Rule: Google reads hyphens (`-`) as word separators, but it joins words connected by underscores (`_`). Use hyphens for all multi-word URLs.)*")
+                            
+                        # Check for Query Parameters
+                        if 'query' in url_df.columns:
+                            param_urls = url_df[url_df['query'].notna() & (url_df['query'] != '')]
+                            if not param_urls.empty:
+                                issues_found = True
+                                st.warning(f"**Found {len(param_urls)} URLs with dynamic query parameters (e.g., `?id=123`).**")
+                                st.markdown("*(Rule: Dynamic parameters can cause massive index bloat if Google crawls every variation. Ensure Canonical tags are in place.)*")
+                                
+                        if not issues_found:
+                            st.success("✅ All URLs follow strict formatting best practices (lowercase, hyphens, static paths).")
+
+                    # Raw Data Drop
+                    st.markdown("---")
+                    st.subheader("Raw URL Database")
+                    st.dataframe(url_df, use_container_width=True)
+                    
+                except Exception as e:
+                    st.error(f"Failed to map URLs. Error: {e}")
 
 # ==========================================
 # TAB 4: N-GRAM ANALYZER
