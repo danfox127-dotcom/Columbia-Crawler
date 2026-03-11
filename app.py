@@ -52,16 +52,74 @@ with tab1:
 # ==========================================
 # TAB 2: SITEMAP AUDITOR
 # ==========================================
+# ==========================================
+# TAB 2: SITEMAP AUDITOR & STRATEGIST ENGINE
+# ==========================================
 with tab2:
-    st.header("🗺️ XML Sitemap Auditor")
+    st.header("🗺️ XML Sitemap Auditor & Strategist Engine")
+    st.markdown("Parse sitemaps and automatically generate actionable Information Architecture insights.")
+    
     sitemap_url = st.text_input("Sitemap URL:", placeholder="https://www.columbiadoctors.org/sitemap.xml")
-    if st.button("📊 Analyze"):
-        try:
-            sitemap_df = adv.sitemap_to_df(sitemap_url)
-            st.write(f"Found {len(sitemap_df)} URLs.")
-            st.dataframe(sitemap_df)
-        except Exception as e:
-            st.error(f"Error: {e}")
+    
+    if st.button("📊 Analyze & Generate Strategy", type="primary"):
+        with st.spinner("Downloading sitemap and running Strategist diagnostics..."):
+            try:
+                sitemap_df = adv.sitemap_to_df(sitemap_url)
+                st.success(f"✅ Extracted {len(sitemap_df)} URLs. Generating Strategic Report...")
+                
+                # --- STRATEGIST DIAGNOSTIC ENGINE ---
+                st.subheader("🧠 Automated Diagnostic Report")
+                
+                # Diagnostic 1: E-E-A-T Freshness Audit
+                if 'lastmod' in sitemap_df.columns:
+                    sitemap_df['lastmod_dt'] = pd.to_datetime(sitemap_df['lastmod'], errors='coerce', utc=True)
+                    now = pd.to_datetime('today', utc=True)
+                    sitemap_df['age_days'] = (now - sitemap_df['lastmod_dt']).dt.days
+                    
+                    stale_1yr = sitemap_df[sitemap_df['age_days'] > 365]
+                    stale_2yr = sitemap_df[sitemap_df['age_days'] > 730]
+                    missing_date = sitemap_df[sitemap_df['lastmod'].isna()]
+                    
+                    with st.expander("🚨 Diagnostic 1: E-E-A-T Freshness Decay", expanded=True):
+                        st.markdown(f"**Severity:** High | **Impact:** Loss of Medical Search Rankings")
+                        st.markdown(f"- **{len(stale_2yr)} pages** haven't been updated in over 2 years.\n- **{len(stale_1yr)} pages** haven't been updated in over 1 year.")
+                        st.markdown("""
+                        **Strategist Action Plan (For Clinical Writers):** Google's YMYL (Your Money or Your Life) algorithm heavily demotes outdated medical content. 
+                        1. Export this list.
+                        2. Identify core condition/treatment pages that are over 2 years old.
+                        3. Review clinical accuracy, update statistics, and republish in the CMS to refresh the `lastmod` timestamp.
+                        """)
+                        if not stale_2yr.empty:
+                            st.write("**Highest Priority (Oldest Pages):**")
+                            st.dataframe(stale_2yr[['loc', 'lastmod']].sort_values(by='lastmod').head(10), use_container_width=True)
+                else:
+                    st.warning("⚠️ No 'lastmod' dates found. This is a critical missed E-E-A-T signal for Googlebot.")
+
+                # Diagnostic 2: CMS Index Bloat (Node/ESI Leaks)
+                if 'loc' in sitemap_df.columns:
+                    # Look for classic CMS garbage patterns
+                    suspicious_urls = sitemap_df[sitemap_df['loc'].str.contains(r'/node/|/esi/|/tag/|/author/', na=False, regex=True)]
+                    
+                    with st.expander("🚨 Diagnostic 2: CMS Leaks & Index Bloat", expanded=True):
+                        if not suspicious_urls.empty:
+                            st.markdown(f"**Severity:** Critical | **Impact:** Crawl Budget Waste & Keyword Cannibalization")
+                            st.markdown(f"**Found {len(suspicious_urls)} suspicious URLs** (e.g., raw `/node/` or `/esi/` fragments) leaking into the sitemap.")
+                            st.markdown("""
+                            **Strategist Action Plan (For Dev Team):**
+                            These are un-aliased backend fragments. Hand this list to your backend developer and instruct them to update the `sitemap.xml` generation rules to strictly exclude raw nodes and cache fragments.
+                            """)
+                            st.dataframe(suspicious_urls[['loc']].head(10), use_container_width=True)
+                        else:
+                            st.success("✅ Architecture looks clean! No obvious `/node/` or `/esi/` CMS leaks detected in the sitemap.")
+
+                # Raw Data Access
+                st.markdown("---")
+                st.subheader("Raw Sitemap Database")
+                st.dataframe(sitemap_df, use_container_width=True)
+                st.download_button("📥 Download Full CSV", data=sitemap_df.to_csv(index=False).encode('utf-8'), file_name="sitemap_audit.csv", mime="text/csv")
+
+            except Exception as e:
+                st.error(f"Failed to analyze sitemap. Error: {e}")
 
 # ==========================================
 # TAB 3: URL STRUCTURE MAPPER
