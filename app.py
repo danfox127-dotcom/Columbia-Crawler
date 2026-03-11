@@ -214,7 +214,7 @@ with tab3:
 # ==========================================
 with tab4:
     st.header("🧠 N-Gram & Keyword Cannibalization Analyzer")
-    st.markdown("Upload a site crawl CSV to find overused phrases in H1s or Meta Titles and automatically diagnose Keyword Cannibalization.")
+    st.markdown("Analyze meta titles and H1s to identify keyword cannibalization, while filtering out CMS brand boilerplate.")
     
     uploaded_file = st.file_uploader("Upload Crawl Data (CSV)", type=["csv"])
     
@@ -222,54 +222,66 @@ with tab4:
         df_text = pd.read_csv(uploaded_file, low_memory=False)
         st.success(f"✅ Loaded dataset with {len(df_text)} rows.")
         
-        col1, col2 = st.columns(2)
+        # --- Settings UI ---
+        col1, col2 = st.columns([1, 1])
         with col1:
-            # Filter to text-heavy columns to make it easier for the user
             text_cols = [c for c in df_text.columns if 'Title' in c or 'H1' in c or 'H2' in c or 'Description' in c]
             if not text_cols: text_cols = df_text.columns.tolist()
             text_col = st.selectbox("Select SEO Element to Analyze:", text_cols)
-        with col2:
+            
             n_gram_size = st.slider("Phrase Length (Words):", 2, 5, 3)
             
+        with col2:
+            st.markdown("**Brand Boilerplate Exclusion**")
+            exclusion_list = st.text_area(
+                "Filter out these phrases (comma separated):", 
+                value="columbiadoctors, cuimc, columbia university, vagelos, college of physicians, mailman, school of nursing, college of dental medicine, irving medical center",
+                height=100
+            )
+
         if st.button("🔍 Analyze for Cannibalization", type="primary"):
-            with st.spinner("Analyzing semantic patterns and checking for cannibalization..."):
+            with st.spinner("Analyzing semantic patterns and filtering boilerplate..."):
                 try:
-                    # Clean and extract text
+                    # 1. Clean and extract text
                     text_data = df_text[text_col].dropna().astype(str).tolist()
                     
-                    # Generate N-Grams
-                    word_freq = adv.word_frequency(text_data, phrase_len=n_gram_size)
+                    # 2. Process Exclusions
+                    # We need to clean the exclusion list and remove those exact strings from the raw text BEFORE running N-Grams
+                    exclusions = [e.strip().lower() for e in exclusion_list.split(',') if e.strip()]
+                    
+                    cleaned_text_data = []
+                    for text in text_data:
+                        lower_text = text.lower()
+                        for exc in exclusions:
+                            # Replace the exact boilerplate phrase with a space
+                            lower_text = lower_text.replace(exc, ' ')
+                        cleaned_text_data.append(lower_text)
+
+                    # 3. Generate N-Grams on the cleaned text
+                    word_freq = adv.word_frequency(cleaned_text_data, phrase_len=n_gram_size)
                     
                     st.subheader("🧠 Automated Diagnostic Report")
                     
-                    # Diagnostic: Keyword Cannibalization
-                    # We look for highly specific phrases that appear on more than 3 different pages
-                    # We drop generic stop words from the top of the list if possible, but advertools handles most of that.
-                    cannibalized = word_freq[word_freq['abs_freq'] > 3].head(10)
+                    # 4. Diagnostic: True Keyword Cannibalization
+                    cannibalized = word_freq[word_freq['abs_freq'] > 3].head(15)
                     
                     with st.expander("🚨 Diagnostic 1: Keyword Cannibalization Risk", expanded=True):
-                        st.markdown("**Severity:** High | **Impact:** Diluted Page Authority & Confused Search Rankings")
-                        
                         if not cannibalized.empty:
                             st.warning(f"**Found {len(cannibalized)} specific phrases competing across multiple pages.**")
                             st.markdown(f"""
-                            **Strategist Action Plan (For Content/SEO Team):**
-                            The phrases below are being used as the exact `{text_col}` on multiple different URLs. 
-                            1. Identify the *one* true 'Pillar' page for each of these topics.
-                            2. Change the `{text_col}` on the competing pages to be highly specific sub-topics (e.g., change 'Heart Disease' to 'Heart Disease Diet').
-                            3. Ensure the sub-topic pages internally link back to the Pillar page.
+                            **Strategist Action Plan:**
+                            The phrases below are competing across multiple URLs. Review these to ensure you aren't diluting your authority on critical medical topics.
                             """)
                             
-                            # Clean up the output table for the user
-                            display_df = cannibalized.rename(columns={'word': 'Target Keyword/Phrase', 'abs_freq': 'Pages Competing (Frequency)'})
-                            st.dataframe(display_df[['Target Keyword/Phrase', 'Pages Competing (Frequency)']], use_container_width=True)
+                            display_df = cannibalized.rename(columns={'word': 'Target Keyword/Phrase', 'abs_freq': 'Pages Competing'})
+                            st.dataframe(display_df[['Target Keyword/Phrase', 'Pages Competing']], use_container_width=True)
                         else:
-                            st.success("✅ No major cannibalization detected for this phrase length! Your topics look well-siloed.")
+                            st.success("✅ No major cannibalization detected! Your topics look well-siloed.")
 
-                    # Raw Data
+                    # Raw Data Drop
                     st.markdown("---")
-                    st.subheader("Raw Semantic Frequency Data")
-                    st.dataframe(word_freq.head(50), use_container_width=True)
+                    st.subheader("Filtered Semantic Frequency Data")
+                    st.dataframe(word_freq.head(100), use_container_width=True)
                     
                 except Exception as e:
-                    st.error(f"Analysis Failed. Ensure the column contains text data. Error: {e}")
+                    st.error(f"Analysis Failed. Error: {e}")
