@@ -216,6 +216,18 @@ with tab4:
     st.header("🧠 N-Gram & Keyword Cannibalization Analyzer")
     st.markdown("Analyze meta titles and H1s to identify keyword cannibalization, and export the exact URLs causing the conflict.")
     
+    # --- Persistent Exclusions Logic ---
+    EXCLUSIONS_FILE = "exclusions.txt"
+    DEFAULT_EXCLUSIONS = "columbiadoctors, cuimc, columbia university, vagelos, college of physicians, mailman, school of nursing, college of dental medicine, irving medical center, department of, division of"
+    
+    # Load exclusions from file, or create it if missing
+    if not os.path.exists(EXCLUSIONS_FILE):
+        with open(EXCLUSIONS_FILE, "w") as f:
+            f.write(DEFAULT_EXCLUSIONS)
+            
+    with open(EXCLUSIONS_FILE, "r") as f:
+        current_exclusions = f.read().strip()
+
     uploaded_file = st.file_uploader("Upload Crawl Data (CSV)", type=["csv"])
     
     if uploaded_file:
@@ -225,12 +237,10 @@ with tab4:
         # --- UI Settings ---
         col1, col2 = st.columns([1, 1])
         with col1:
-            # Auto-detect text column
             text_cols = [c for c in df_text.columns if 'Title' in c or 'H1' in c or 'H2' in c or 'Description' in c]
             if not text_cols: text_cols = df_text.columns.tolist()
             text_col = st.selectbox("Select SEO Element to Analyze:", text_cols)
             
-            # Auto-detect URL column for reverse mapping
             url_cols = [c for c in df_text.columns if c.lower() in ['address', 'url', 'loc', 'link']]
             if not url_cols: url_cols = df_text.columns.tolist()
             url_col = st.selectbox("Select URL/Address Column for Mapping:", url_cols)
@@ -238,19 +248,29 @@ with tab4:
             n_gram_size = st.slider("Phrase Length (Words):", 2, 5, 3)
             
         with col2:
-            st.markdown("**Brand Boilerplate Exclusion**")
-            exclusion_list = st.text_area(
-                "Filter out these phrases (comma separated):", 
-                value="columbiadoctors, cuimc, columbia university, vagelos, college of physicians, mailman, school of nursing, college of dental medicine, irving medical center, department of, division of",
+            st.markdown("**Brand Boilerplate Exclusion Database**")
+            updated_exclusions = st.text_area(
+                "Edit and save your custom exclusion list (comma separated):", 
+                value=current_exclusions,
                 height=130
             )
+            
+            # Save Button for the Database
+            if st.button("💾 Save to Exclusion Database"):
+                with open(EXCLUSIONS_FILE, "w") as f:
+                    f.write(updated_exclusions)
+                st.success("✅ Exclusions saved and applied for this session!")
 
         if st.button("🔍 Analyze and Map URLs", type="primary"):
             with st.spinner("Analyzing semantics and mapping phrases to URLs..."):
                 try:
-                    # 1. Clean and extract text
                     df_text['__clean_text'] = df_text[text_col].astype(str).str.lower()
-                    exclusions = [e.strip().lower() for e in exclusion_list.split(',') if e.strip()]
+                    
+                    # Read the most freshly saved exclusions
+                    with open(EXCLUSIONS_FILE, "r") as f:
+                        active_exclusions = f.read().strip()
+                        
+                    exclusions = [e.strip().lower() for e in active_exclusions.split(',') if e.strip()]
                     
                     cleaned_texts = []
                     for text in df_text['__clean_text']:
@@ -258,48 +278,42 @@ with tab4:
                             text = text.replace(exc, ' ')
                         cleaned_texts.append(text)
                         
-                    # 2. Generate N-Grams
                     word_freq = adv.word_frequency(cleaned_texts, phrase_len=n_gram_size)
                     
                     st.subheader("🧠 Cannibalization Diagnostic & Export")
                     
-                    # 3. Identify Cannibalization
-                    cannibalized = word_freq[word_freq['abs_freq'] > 3].head(20)
-                    
-                    if not cannibalized.empty:
-                        st.warning(f"**Found {len(cannibalized)} phrases competing across multiple pages.**")
+                    if 'abs_freq' in word_freq.columns:
+                        cannibalized = word_freq[word_freq['abs_freq'] > 3].head(20)
                         
-                        # --- REVERSE URL MAPPING ENGINE ---
-                        mapping_data = []
-                        for phrase in cannibalized['word']:
-                            # Find all rows in the dataframe where the lowercased text contains the phrase
-                            matching_rows = df_text[df_text['__clean_text'].str.contains(phrase, regex=False, na=False)]
+                        if not cannibalized.empty:
+                            st.warning(f"**Found {len(cannibalized)} phrases competing across multiple pages.**")
                             
-                            for _, row in matching_rows.iterrows():
-                                mapping_data.append({
-                                    'Cannibalized Phrase': phrase,
-                                    'Original Text Element': row[text_col],
-                                    'URL': row[url_col]
-                                })
-                                
-                        mapping_df = pd.DataFrame(mapping_data)
-                        
-                        # Display the mapped data
-                        st.dataframe(mapping_df, use_container_width=True)
-                        
-                        # Export Button
-                        csv = mapping_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="📥 Download URL Mapping Report (CSV)",
-                            data=csv,
-                            file_name="cannibalization_url_mapping.csv",
-                            mime="text/csv",
-                            type="primary"
-                        )
+                            mapping_data = []
+                            for phrase in cannibalized['word']:
+                                matching_rows = df_text[df_text['__clean_text'].str.contains(phrase, regex=False, na=False)]
+                                for _, row in matching_rows.iterrows():
+                                    mapping_data.append({
+                                        'Cannibalized Phrase': phrase,
+                                        'Original Text Element': row[text_col],
+                                        'URL': row[url_col]
+                                    })
+                                    
+                            mapping_df = pd.DataFrame(mapping_data)
+                            st.dataframe(mapping_df, use_container_width=True)
+                            
+                            csv = mapping_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="📥 Download URL Mapping Report (CSV)",
+                                data=csv,
+                                file_name="cannibalization_url_mapping.csv",
+                                mime="text/csv",
+                                type="primary"
+                            )
+                        else:
+                            st.success("✅ No major cannibalization detected! Topics look well-siloed.")
                     else:
-                        st.success("✅ No major cannibalization detected! Topics look well-siloed.")
+                        st.info("Not enough data to find repeated phrases.")
 
-                    # Cleanup
                     df_text.drop(columns=['__clean_text'], inplace=True)
                     
                 except Exception as e:
