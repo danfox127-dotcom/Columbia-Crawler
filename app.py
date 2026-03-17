@@ -41,7 +41,7 @@ class SEOSitemapSpider(CrawlSpider):
     )
 
     custom_settings = {{
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_MAXSIZE': 5242880,
         'LOG_LEVEL': 'INFO',
@@ -66,12 +66,12 @@ if __name__ == "__main__":
     process.crawl(SEOSitemapSpider)
     process.start()
 """
-    with open("spider_script.py", "w") as f:
+    with open("spider_script.py", "w", encoding="utf-8") as f:
         f.write(script_content)
 
 # --- 4. APP LAYOUT & UI ---
 st.title("🕷️ Live SEO Crawler")
-st.markdown("Crawl the Columbia site to extract titles, H1s, and Meta Descriptions. Now equipped with safe-download limits and extension blocking.")
+st.markdown("Crawl the Columbia site to extract titles, H1s, and Meta Descriptions.")
 
 with st.sidebar:
     st.header("⚙️ Crawler Settings")
@@ -89,8 +89,6 @@ if start_button:
         with st.spinner(f"Crawling {target_url}... This may take a few minutes depending on page count."):
             create_spider_script(target_url, max_pages_input, output_jsonl)
             
-            # Use sys.executable to guarantee we use the right Python environment
-            # Use capture_output=True so we can read the actual Scrapy error if it fails
             result = subprocess.run(
                 [sys.executable, "spider_script.py"], 
                 capture_output=True, 
@@ -99,7 +97,6 @@ if start_button:
             
             if result.returncode != 0:
                 st.error("Crawler failed to run. Here is the exact error from Scrapy:")
-                # Print the raw error trace so we know exactly what went wrong
                 st.code(result.stderr, language="bash")
             else:
                 if os.path.exists(output_jsonl) and os.path.getsize(output_jsonl) > 0:
@@ -112,4 +109,11 @@ if start_button:
                     
                     csv_data = df.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="
+                        label="Download Data as CSV",
+                        data=csv_data,
+                        file_name="columbia_seo_audit.csv",
+                        mime="text/csv",
+                        type="primary"
+                    )
+                else:
+                    st.warning("The crawler finished successfully, but no pages were saved. The site might be blocking the bot.")
