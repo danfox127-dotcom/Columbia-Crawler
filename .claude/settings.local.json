@@ -14,7 +14,13 @@
       "Bash(.venv/bin/python -c \"from google import genai; print\\(''google-genai OK''\\)\")",
       "Bash(.venv/bin/python -c \"import app\")",
       "Bash(.venv/bin/python -c \"import lxml; print\\(''lxml ok''\\)\")",
-      "Bash(.venv/bin/python -c \"import tldextract; print\\(''tldextract ok''\\)\")"
+      "Bash(.venv/bin/python -c \"import tldextract; print\\(''tldextract ok''\\)\")",
+      "Bash(hf whoami:*)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(.venv/bin/python -c \"from huggingface_hub import HfApi; api = HfApi\\(\\); print\\(api.whoami\\(\\)\\)\")",
+      "Read(//Users/df2832/.cache/huggingface/**)",
+      "Read(//Users/df2832/.huggingface/**)",
+      "Bash(.venv/bin/python -c \":*)"
     ]
   }
 }
