@@ -3,10 +3,16 @@ app.py — Content CT: a CAT scan for your site's content problems.
 Streamlit UI wrapping crawler.py, auditor.py, and ai_advisor.py.
 """
 
+import os
+
 import pandas as pd
 import streamlit as st
 
 from ai_advisor import create_advisor
+
+# ── Env-var API keys (used by HuggingFace Spaces secrets) ────────────────────
+_ENV_ANTHROPIC = os.environ.get("ANTHROPIC_API_KEY", "")
+_ENV_GEMINI    = os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
 from auditor import Issue, audit, to_dataframe
 from crawler import Crawler
 
@@ -122,19 +128,27 @@ with st.sidebar:
             help="Gemini Flash is cheaper for high-volume audits. Claude is stronger for copywriting.",
         )
         if ai_provider == "Gemini (Google)":
-            api_key_input = st.text_input(
-                "Gemini API Key",
-                type="password",
-                placeholder="AIza...",
-                help="Get one at aistudio.google.com/apikey — free tier available",
-            )
+            if _ENV_GEMINI:
+                st.success("Gemini API key loaded from environment ✓")
+                api_key_input = _ENV_GEMINI
+            else:
+                api_key_input = st.text_input(
+                    "Gemini API Key",
+                    type="password",
+                    placeholder="AIza...",
+                    help="Get one at aistudio.google.com/apikey — free tier available",
+                )
         else:
-            api_key_input = st.text_input(
-                "Anthropic API Key",
-                type="password",
-                placeholder="sk-ant-...",
-                help="Get one at console.anthropic.com",
-            )
+            if _ENV_ANTHROPIC:
+                st.success("Anthropic API key loaded from environment ✓")
+                api_key_input = _ENV_ANTHROPIC
+            else:
+                api_key_input = st.text_input(
+                    "Anthropic API Key",
+                    type="password",
+                    placeholder="sk-ant-...",
+                    help="Get one at console.anthropic.com",
+                )
         max_ai_calls = st.slider(
             "Max AI calls",
             min_value=5,
@@ -180,7 +194,8 @@ if start_btn:
         st.error("Please enter a valid URL starting with http:// or https://")
         st.stop()
     if ai_enabled and not api_key_input:
-        st.error("Enter your Anthropic API key to use AI suggestions, or turn AI off.")
+        provider_name = "Gemini" if ai_provider == "Gemini (Google)" else "Anthropic"
+        st.error(f"Enter your {provider_name} API key to use AI suggestions, or turn AI off.")
         st.stop()
 
     # Reset
