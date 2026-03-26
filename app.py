@@ -504,6 +504,7 @@ elif not st.session_state.crawl_done:
             st.markdown("""
 **On-page structure**
 - Missing or multiple H1 tags
+- Missing H2 tags
 - Missing, empty, or poor alt text
 - Missing canonical tags
 - Redirect chains

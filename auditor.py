@@ -43,6 +43,7 @@ _META: Dict[str, tuple] = {
     "meta_too_short":    ("Meta Description Too Short (<70)",    "Low"),
     "missing_h1":        ("Missing H1 Tag",                      "High"),
     "multiple_h1":       ("Multiple H1 Tags",                    "Medium"),
+    "missing_h2":        ("Missing H2 Tag",                      "Low"),
     "missing_alt":       ("Missing Alt Text",                    "High"),
     "empty_alt":         ("Empty Alt Text",                      "Medium"),
     "poor_alt":          ("Poor Alt Text (filename / too short)", "Medium"),
@@ -212,6 +213,12 @@ def _audit_page(page, title_map, meta_map) -> List[Issue]:
         out.append(_mk(page, "multiple_h1", "<h1>",
             f"{len(page.h1s)} H1 tags: {_trunc(sample, 80)}",
             f"Keep only one H1. Convert the others to H2 or H3."))
+
+    # ── H2 ───────────────────────────────────────────────────────────────────
+    if not page.h2s:
+        out.append(_mk(page, "missing_h2", "<h2>", "(missing)",
+            "Page lacks H2 subheadings. Add H2s to break up content and "
+            "structure topics logically for better readability and SEO."))
 
     # ── Images ───────────────────────────────────────────────────────────────
     for img in page.images:

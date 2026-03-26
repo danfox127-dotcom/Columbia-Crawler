@@ -29,6 +29,7 @@ class PageData:
     status_code: int = 0
     title: str = ""
     h1s: List[str] = field(default_factory=list)
+    h2s: List[str] = field(default_factory=list)
     meta_description: str = ""
     canonical: str = ""
     word_count: int = 0
@@ -219,6 +220,13 @@ class Crawler:
         page.h1s = [
             h.get_text(strip=True)
             for h in soup.find_all("h1")
+            if h.get_text(strip=True)
+        ]
+
+        # H2s
+        page.h2s = [
+            h.get_text(strip=True)
+            for h in soup.find_all("h2")
             if h.get_text(strip=True)
         ]
 
