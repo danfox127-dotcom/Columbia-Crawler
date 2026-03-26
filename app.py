@@ -3,7 +3,10 @@ app.py — Content CT: a CAT scan for your site's content problems.
 Streamlit UI wrapping crawler.py, auditor.py, and ai_advisor.py.
 """
 
+import hashlib
 import os
+import pickle
+import time
 
 import pandas as pd
 import streamlit as st
@@ -83,6 +86,7 @@ _DEFAULTS = {
     "crawl_done": False,
     "pages_crawled": 0,
     "ai_calls_made": 0,
+    "full_site_covered": False,
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
@@ -96,7 +100,7 @@ with st.sidebar:
     st.divider()
 
     st.subheader("Crawl Settings")
-    url_input = st.text_input("Start URL", placeholder="https://example.com")
+    url_input = st.text_input("Start URL", placeholder="columbiadoctors.org")
     max_pages = st.slider("Max pages", min_value=10, max_value=2500, value=100, step=10)
     delay = st.select_slider(
         "Crawl delay (s)",
@@ -190,13 +194,41 @@ st.markdown(
 # ── Run audit ─────────────────────────────────────────────────────────────────
 
 if start_btn:
-    if not url_input or not url_input.startswith("http"):
-        st.error("Please enter a valid URL starting with http:// or https://")
+    if not url_input:
+        st.error("Please enter a valid URL")
         st.stop()
+    if not url_input.startswith("http://") and not url_input.startswith("https://"):
+        url_input = "https://" + url_input
     if ai_enabled and not api_key_input:
         provider_name = "Gemini" if ai_provider == "Gemini (Google)" else "Anthropic"
         st.error(f"Enter your {provider_name} API key to use AI suggestions, or turn AI off.")
         st.stop()
+
+    # Cache lookup
+    target_types_cache = ""
+    if ai_enabled:
+        target_types_cache = f"{ai_missing_alt}_{ai_empty_alt}_{ai_poor_alt}_{ai_meta}_{ai_title}"
+        
+    cache_str = f"{url_input}|{max_pages}|{exclude_paths_input}|{include_paths_input}|{ai_enabled}|{ai_provider}|{max_ai_calls}|{target_types_cache}"
+    cache_key = hashlib.md5(cache_str.encode()).hexdigest()
+    cache_dir = ".ct_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{cache_key}.pkl")
+    thirty_days = 30 * 24 * 3600
+    
+    if os.path.exists(cache_path) and time.time() - os.path.getmtime(cache_path) < thirty_days:
+        st.success("Loaded previous scan from cache (saved within the last month)!")
+        with open(cache_path, "rb") as f:
+            cdata = pickle.load(f)
+        st.session_state.pages = cdata["pages"]
+        st.session_state.issues = cdata["issues"]
+        st.session_state.issues_df = cdata["issues_df"]
+        st.session_state.pages_crawled = cdata["pages_crawled"]
+        st.session_state.ai_calls_made = cdata["ai_calls_made"]
+        st.session_state.full_site_covered = cdata.get("full_site_covered", False)
+        st.session_state.crawl_done = True
+        time.sleep(1.5)
+        st.rerun()
 
     # Reset
     for _k, _v in _DEFAULTS.items():
@@ -220,14 +252,18 @@ if start_btn:
     status_txt = st.empty()
     pages = []
 
+    last_in_queue = 0
     for page_data, done, in_queue in crawler.crawl():
         pages.append(page_data)
         total_est = max(done + in_queue, max_pages)
         prog_bar.progress(min(done / total_est, 1.0))
         status_txt.caption(f"Page {done} — {page_data.url[:90]}")
+        last_in_queue = in_queue
 
     prog_bar.empty()
     status_txt.empty()
+    
+    full_site_covered = (last_in_queue == 0)
 
     # ── Audit ──────────────────────────────────────────────────────────────
     with st.spinner("Analysing pages for SEO issues…"):
@@ -318,7 +354,19 @@ if start_btn:
     st.session_state.issues_df = to_dataframe(issues)
     st.session_state.pages_crawled = len(pages)
     st.session_state.ai_calls_made = ai_calls
+    st.session_state.full_site_covered = full_site_covered
     st.session_state.crawl_done = True
+    
+    with open(cache_path, "wb") as f:
+        pickle.dump({
+            "pages": pages,
+            "issues": issues,
+            "issues_df": st.session_state.issues_df,
+            "pages_crawled": len(pages),
+            "ai_calls_made": ai_calls,
+            "full_site_covered": full_site_covered
+        }, f)
+        
     st.rerun()
 
 # ── Results ───────────────────────────────────────────────────────────────────
@@ -354,6 +402,12 @@ if st.session_state.crawl_done:
     ]
     for col, (label, val, cls) in zip(cols, cards):
         col.markdown(_card(label, val, cls), unsafe_allow_html=True)
+
+    st.markdown("")
+    if st.session_state.get("full_site_covered"):
+        st.success("✅ **Scan Complete & Comprehensive:** The entire site (or specified sub-paths) was successfully crawled.")
+    else:
+        st.warning(f"⚠️ **Scan Partial:** The crawl hit the limit of {n_pages} pages before fully exploring the site. Consider increasing the Max Pages limit.")
 
     st.markdown("")
 
