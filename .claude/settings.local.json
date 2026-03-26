@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(pip install:*)",
+      "Bash(python3 -m pip install -r \"/Users/df2832/Content CT/requirements.txt\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python3 -c \"import streamlit; print\\(streamlit.__file__\\)\")",
+      "Bash(python3 -m streamlit --version)",
+      "Bash(lsof -ti:8503)",
+      "Bash(python3 -m pip install google-generativeai Pillow --quiet)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(.venv/bin/python -c \"from google import genai; print\\(''google-genai OK''\\)\")"
+    ]
+  }
+}
