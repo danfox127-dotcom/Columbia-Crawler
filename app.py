@@ -101,7 +101,7 @@ with st.sidebar:
 
     st.subheader("Crawl Settings")
     url_input = st.text_input("Start URL", placeholder="columbiadoctors.org")
-    max_pages = st.slider("Max pages", min_value=10, max_value=2500, value=100, step=10)
+    max_pages = st.slider("Max pages", min_value=10, max_value=5000, value=100, step=10)
     delay = st.select_slider(
         "Crawl delay (s)",
         options=[0.0, 0.25, 0.5, 1.0, 2.0],
