@@ -15,6 +15,37 @@ SEVERITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
 _FILENAME_RE = re.compile(r"\.(jpe?g|png|gif|webp|svg|bmp|tiff?)$", re.I)
 
+# Paths that indicate UI chrome / map tiles — not content images
+_DECORATIVE_PATH_RE = re.compile(
+    r"/assets/static/"      # Vite/framework hashed UI assets
+    r"|/static/"            # generic static dirs
+    r"|staticmaps"          # Google Maps static tile embeds
+    r"|/icons?/"
+    r"|/sprites?/",
+    re.I,
+)
+
+# Filename stems that are obviously decorative icons
+_DECORATIVE_NAME_RE = re.compile(
+    r"arrow|chevron|caret|hamburger|menu-icon"
+    r"|phone-white|phone-outline|phone-icon"
+    r"|email-icon|envelope"
+    r"|checkmark|check-icon|check-"
+    r"|plus-icon|minus-icon|close-icon|close-btn"
+    r"|bear-icon|shield|education-icon|video-camera-icon"
+    r"|social-|facebook|twitter|instagram|linkedin|youtube"
+    r"|logo\b|wordmark",
+    re.I,
+)
+
+
+def _is_decorative(src: str) -> bool:
+    """Return True if an image is almost certainly a UI chrome / icon element."""
+    if _DECORATIVE_PATH_RE.search(src):
+        return True
+    filename = src.split("/")[-1].split("?")[0]
+    return bool(_DECORATIVE_NAME_RE.search(filename))
+
 
 @dataclass
 class Issue:
@@ -221,27 +252,52 @@ def _audit_page(page, title_map, meta_map) -> List[Issue]:
             "structure topics logically for better readability and SEO."))
 
     # ── Images ───────────────────────────────────────────────────────────────
+    # Bucket content images by issue type; skip UI icons/map tiles; dedupe by src.
+    missing_alts, empty_alts, poor_alts = [], [], []
+    seen_srcs: set = set()
+
     for img in page.images:
-        src_label = f'<img src="{_trunc(img.src, 70)}">'
+        if _is_decorative(img.src):
+            continue                      # skip chrome/icons/maps
+        if img.src in seen_srcs:
+            continue                      # same src already counted
+        seen_srcs.add(img.src)
+
         if img.alt is None:
-            out.append(_mk(page, "missing_alt", src_label,
-                "(alt attribute absent)",
-                "Add a descriptive alt attribute. "
-                "AI can analyse the image and draft alt text.",
-                image_src=img.src))
+            missing_alts.append(img)
         elif img.alt.strip() == "":
-            out.append(_mk(page, "empty_alt", src_label,
-                'alt=""',
-                "If decorative, alt=\"\" is correct. "
-                "If the image conveys information, add descriptive text. "
-                "AI can review the image.",
-                image_src=img.src))
+            empty_alts.append(img)
         elif _poor_alt(img.alt):
-            out.append(_mk(page, "poor_alt", src_label,
-                f'alt="{img.alt}"',
-                f'Alt text "{img.alt}" looks like a filename or is too brief. '
-                "AI can rewrite it.",
-                image_src=img.src))
+            poor_alts.append(img)
+
+    def _img_examples(imgs, show=3):
+        names = [img.src.split("/")[-1].split("?")[0] for img in imgs[:show]]
+        suffix = f" + {len(imgs) - show} more" if len(imgs) > show else ""
+        return ", ".join(names) + suffix
+
+    if missing_alts:
+        n = len(missing_alts)
+        out.append(_mk(page, "missing_alt", f"{n} image(s)",
+            f"{n} image(s) missing alt attribute — e.g. {_img_examples(missing_alts)}",
+            "Add descriptive alt attributes to each. "
+            "AI can analyse the images and draft alt text.",
+            image_src=missing_alts[0].src))
+
+    if empty_alts:
+        n = len(empty_alts)
+        out.append(_mk(page, "empty_alt", f"{n} image(s)",
+            f"{n} image(s) with empty alt=\"\" — e.g. {_img_examples(empty_alts)}",
+            "Review each: if truly decorative, alt=\"\" is correct. "
+            "If the image conveys content (e.g. a doctor photo or diagram), add descriptive text.",
+            image_src=empty_alts[0].src))
+
+    if poor_alts:
+        n = len(poor_alts)
+        examples = ", ".join(f'"{i.alt}"' for i in poor_alts[:3])
+        out.append(_mk(page, "poor_alt", f"{n} image(s)",
+            f"{n} image(s) with filename-style alt — e.g. {examples}",
+            "Rewrite alt text to describe the image content. AI can help.",
+            image_src=poor_alts[0].src))
 
     # ── Content & performance ─────────────────────────────────────────────────
     if 0 < page.word_count < 300:
