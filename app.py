@@ -48,6 +48,9 @@ class SEOSitemapSpider(CrawlSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_MAXSIZE': 5242880,
         'LOG_LEVEL': 'INFO',
+        'DEPTH_PRIORITY': 1,
+        'SCHEDULER_DISK_QUEUE': 'scrapy.squeues.PickleFifoDiskQueue',
+        'SCHEDULER_MEMORY_QUEUE': 'scrapy.squeues.FifoMemoryQueue',
         {page_limit_code}
         'FEEDS': {{
             '{output_file}': {{'format': 'jsonlines', 'overwrite': True}}
