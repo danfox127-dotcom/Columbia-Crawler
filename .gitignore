@@ -1,1 +1,10 @@
-.env\n.venv\n__pycache__/\n*.pyc\n.mypy_cache/\n.ruff_cache/\n
+.env
+.venv
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.claude/
+.vscode/
+*.log
+crawl_output.jsonl
