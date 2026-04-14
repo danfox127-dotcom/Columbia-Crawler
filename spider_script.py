@@ -6,13 +6,16 @@ from scrapy.linkextractors import LinkExtractor
 
 class SEOSitemapSpider(CrawlSpider):
     name = 'seo_spider'
-    allowed_domains = ['www.columbiamedicine.org']
-    start_urls = ['https://www.columbiamedicine.org/']
+    allowed_domains = ['vagelos.columbia.edu']
+    start_urls = ['https://vagelos.columbia.edu']
     
     rules = (
         Rule(
-            LinkExtractor(deny_extensions=['7z', 'gz', 'txt', 'zip', 'csv', 'pdf', 'docx', 'xlsx', 'tar', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js']), 
-            callback='parse_item', 
+            LinkExtractor(
+                deny_extensions=['7z', 'gz', 'txt', 'zip', 'csv', 'pdf', 'docx', 'xlsx', 'tar', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js'],
+                deny=[r'/file/\d+/download']
+            ),
+            callback='parse_item',
             follow=True
         ),
     )
@@ -22,7 +25,11 @@ class SEOSitemapSpider(CrawlSpider):
         'ROBOTSTXT_OBEY': False,
         'DOWNLOAD_MAXSIZE': 5242880,
         'LOG_LEVEL': 'INFO',
-        'CLOSESPIDER_PAGECOUNT': 700,
+        'CLOSESPIDER_PAGECOUNT': 210,
+        # Breadth-first crawling: process shallower pages before deeper ones
+        'DEPTH_PRIORITY': 1,
+        'SCHEDULER_DISK_QUEUE': 'scrapy.squeues.PickleFifoDiskQueue',
+        'SCHEDULER_MEMORY_QUEUE': 'scrapy.squeues.FifoMemoryQueue',
         'FEEDS': {
             'crawl_output.jsonl': {'format': 'jsonlines', 'overwrite': True}
         }
