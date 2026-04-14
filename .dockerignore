@@ -1,0 +1,9 @@
+.git
+__pycache__
+.venv
+.vscode
+Vagelos CSV.csv
+*.pyc
+*.pyo
+dist
+build
