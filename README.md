@@ -3,7 +3,9 @@ title: Content Ct
 emoji: 🦀
 colorFrom: blue
 colorTo: indigo
-sdk: docker
+sdk: streamlit
+sdk_version: "1.32.0"
+app_file: app.py
 pinned: false
 ---
 
