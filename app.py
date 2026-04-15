@@ -53,6 +53,8 @@ class SEOSitemapSpider(CrawlSpider):
         'DEPTH_PRIORITY': 1,
         'SCHEDULER_DISK_QUEUE': 'scrapy.squeues.PickleFifoDiskQueue',
         'SCHEDULER_MEMORY_QUEUE': 'scrapy.squeues.FifoMemoryQueue',
+        'TELNETCONSOLE_ENABLED': False,
+        'LOGSTATS_INTERVAL': 3,
         {page_limit_code}
         'FEEDS': {{
             '{output_file}': {{'format': 'jsonlines', 'overwrite': True}}
@@ -244,9 +246,15 @@ if start_button:
     if not target_url:
         st.error("Please enter a valid Start URL.")
     else:
+        if not target_url.startswith('http://') and not target_url.startswith('https://'):
+            target_url = 'https://' + target_url
+            
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
+        
+        if os.path.exists(output_jsonl):
+            os.remove(output_jsonl)
 
         with st.spinner(f"Crawling {target_url}..."):
             try:
@@ -257,12 +265,45 @@ if start_button:
                     crawl_with_requests(target_url, max_pages_input, output_jsonl, banned_extensions)
                 except Exception as e:
                     st.error(f"Fallback crawler failed: {e}")
+                
+                if os.path.exists(output_jsonl) and os.path.getsize(output_jsonl) > 0:
+                    pass # Handled below
+                else:
+                    st.warning("Fallback crawl finished, but no pages were scraped.")
             else:
                 create_spider_script(target_url, max_pages_input, output_jsonl)
-                result = subprocess.run([sys.executable, "spider_script.py"], capture_output=True, text=True)
-                if result.returncode != 0:
+                
+                progress_text = st.empty()
+                
+                process = subprocess.Popen(
+                    [sys.executable, "spider_script.py"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1
+                )
+                
+                stderr_output = []
+                while True:
+                    line = process.stderr.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        stderr_output.append(line)
+                        if "Crawled" in line and "scraped" in line:
+                            # e.g., "INFO: Crawled 10 pages (at 10 pages/min), scraped 8 items (at 8 items/min)"
+                            parts = line.split("INFO:")
+                            if len(parts) > 1:
+                                msg = parts[1].strip()
+                                progress_text.info(f"🕷️ **Crawler Progress:** {msg}")
+                
+                if process.returncode != 0:
                     st.error("Scrapy failed:")
-                    st.code(result.stderr, language="bash")
+                    st.code("".join(stderr_output), language="bash")
+                else:
+                    progress_text.empty()
+                    if not (os.path.exists(output_jsonl) and os.path.getsize(output_jsonl) > 0):
+                        st.warning("Crawl finished, but no pages were scraped. Check the URL or allow rules.")
 
         if os.path.exists(output_jsonl) and os.path.getsize(output_jsonl) > 0:
             with open(output_jsonl, 'r', encoding='utf-8') as f:
