@@ -315,21 +315,50 @@ if st.session_state.df is not None:
             st.success("No SEO issues found!")
 
     with tab3:
-        flagged = issues_df[issues_df['issue_count'] > 0]
+        flagged = issues_df[issues_df['issue_count'] > 0].sort_values('issue_count', ascending=False).reset_index(drop=True)
         if flagged.empty:
             st.info("No issues found — nothing for Gemini to fix.")
         else:
-            st.markdown(f"**{len(flagged)} pages with issues** ready for AI analysis.")
-            max_pages_gemini = st.slider("Pages to send to Gemini (most issues first)", 1, min(len(flagged), 20), min(5, len(flagged)))
-            analyze_button = st.button("✨ Analyze with Gemini", use_container_width=True)
+            st.markdown(
+                f"**Select up to 20 rows** to send to Gemini. "
+                f"{len(flagged)} pages have issues — sorted by most issues first."
+            )
+
+            selection = st.dataframe(
+                flagged[['url', 'title', 'meta_desc', 'h1', 'word_count', 'issues']],
+                use_container_width=True,
+                hide_index=False,
+                on_select="rerun",
+                selection_mode="multi-row",
+            )
+
+            selected_indices = selection.selection.rows if selection.selection.rows else []
+            selected_count = len(selected_indices)
+
+            if selected_count > 20:
+                st.warning(f"You selected {selected_count} rows — only the first 20 will be sent to Gemini.")
+                selected_indices = selected_indices[:20]
+
+            col_a, col_b = st.columns([3, 1])
+            with col_a:
+                if selected_count:
+                    st.caption(f"{min(selected_count, 20)} page(s) selected")
+                else:
+                    st.caption("No rows selected — click rows in the table above to choose pages.")
+            with col_b:
+                analyze_button = st.button(
+                    "✨ Analyze with Gemini",
+                    use_container_width=True,
+                    disabled=(selected_count == 0),
+                )
 
             if analyze_button:
                 if not gemini_key:
                     st.error("Add your Gemini API key in the sidebar or set GEMINI_API_KEY in HF Secrets.")
                 else:
-                    top_pages = flagged.head(max_pages_gemini)
-                    prompt = build_gemini_prompt(top_pages)
-                    with st.spinner("Asking Gemini for corrections..."):
+                    chosen = flagged.iloc[selected_indices]
+                    prompt = build_gemini_prompt(chosen)
+                    with st.spinner(f"Asking Gemini to analyse {len(chosen)} page(s)..."):
                         try:
                             st.session_state.gemini_response = call_gemini(prompt, gemini_key)
                         except Exception as e:
