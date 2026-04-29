@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 SOURCE_APP = "content_ct"
 SOURCE_APP_VERSION = "1.0.0"
@@ -50,6 +50,8 @@ def parse_export_jsonl(file_content: str) -> Tuple[Optional[dict], List[dict]]:
             continue
         kind = obj.get("kind")
         if kind == "header":
+            if header is not None:
+                raise ValueError("duplicate header in JSONL stream")
             header = obj
         elif kind == "page":
             pages.append(obj)
