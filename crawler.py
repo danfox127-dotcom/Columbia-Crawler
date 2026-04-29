@@ -42,6 +42,27 @@ class PageData:
     content_snippet: str = ""
     error: Optional[str] = None
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "page",
+            "url": self.url,
+            "status_code": self.status_code,
+            "title": self.title,
+            "h1s": self.h1s,
+            "h2s": self.h2s,
+            "meta_description": self.meta_description,
+            "canonical": self.canonical,
+            "word_count": self.word_count,
+            "content_snippet": self.content_snippet,
+            "internal_links": self.internal_links,
+            "external_links": self.external_links,
+            "is_redirect": self.is_redirect,
+            "redirect_chain": self.redirect_chain,
+            "images": [{"src": img.src, "alt": img.alt} for img in self.images],
+            "load_time": round(self.load_time, 3),
+            "error": self.error,
+        }
+
 
 class Crawler:
     _HEADERS = {
@@ -67,6 +88,7 @@ class Crawler:
         timeout: int = 10,
         exclude_paths: Optional[List[str]] = None,
         include_paths: Optional[List[str]] = None,
+        seed_visited: Optional[set] = None,
     ):
         self.start_url = start_url.rstrip("/")
         self.max_pages = max_pages
@@ -78,7 +100,7 @@ class Crawler:
         parsed = urlparse(start_url)
         self.base_netloc = parsed.netloc
 
-        self.visited: "set[str]" = set()
+        self.visited: "set[str]" = set(seed_visited) if seed_visited else set()
         self.queue: "deque[str]" = deque([self.start_url])
 
         self.session = requests.Session()
