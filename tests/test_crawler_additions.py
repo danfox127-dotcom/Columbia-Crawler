@@ -68,3 +68,10 @@ def test_crawler_no_seed_starts_empty():
 def test_crawler_none_seed_starts_empty():
     c = Crawler("https://example.com", max_pages=5, respect_robots=False, seed_visited=None)
     assert len(c.visited) == 0
+
+
+def test_crawler_seed_visited_does_not_mutate_caller():
+    seeded = {"https://example.com/already-crawled"}
+    c = Crawler("https://example.com", max_pages=5, respect_robots=False, seed_visited=seeded)
+    c.visited.add("https://example.com/new-page")
+    assert "https://example.com/new-page" not in seeded

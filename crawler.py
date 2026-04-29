@@ -48,16 +48,16 @@ class PageData:
             "url": self.url,
             "status_code": self.status_code,
             "title": self.title,
-            "h1s": self.h1s,
-            "h2s": self.h2s,
+            "h1s": list(self.h1s),
+            "h2s": list(self.h2s),
             "meta_description": self.meta_description,
             "canonical": self.canonical,
             "word_count": self.word_count,
             "content_snippet": self.content_snippet,
-            "internal_links": self.internal_links,
-            "external_links": self.external_links,
+            "internal_links": list(self.internal_links),
+            "external_links": list(self.external_links),
             "is_redirect": self.is_redirect,
-            "redirect_chain": self.redirect_chain,
+            "redirect_chain": list(self.redirect_chain),
             "images": [{"src": img.src, "alt": img.alt} for img in self.images],
             "load_time": round(self.load_time, 3),
             "error": self.error,
@@ -100,7 +100,7 @@ class Crawler:
         parsed = urlparse(start_url)
         self.base_netloc = parsed.netloc
 
-        self.visited: "set[str]" = set(seed_visited) if seed_visited else set()
+        self.visited: "set[str]" = set(seed_visited) if seed_visited is not None else set()
         self.queue: "deque[str]" = deque([self.start_url])
 
         self.session = requests.Session()
