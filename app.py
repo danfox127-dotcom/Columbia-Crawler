@@ -197,7 +197,7 @@ def _render_linkup_export_button(df, crawl_pages, crawl_meta):
                 "url": str(row.get("url", "")),
                 "status_code": int(row.get("status", 0) or 0),
                 "title": str(row.get("title", "") or ""),
-                "h1s": [row["h1"]] if row.get("h1") else [],
+                "h1s": [str(row.get("h1"))] if row.get("h1") else [],
                 "h2s": [],
                 "meta_description": str(row.get("meta_desc", "") or ""),
                 "canonical": "",
