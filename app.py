@@ -8,14 +8,10 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from crawler import Crawler as BFSCrawler
-from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
+from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl  # build_header + build_export_jsonl used in Task 4 export button
 
 # --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", layout="wide")
-
-# --- 2. CONSTANTS ---
-banned_extensions = ['7z', 'gz', 'txt', 'zip', 'csv', 'pdf', 'docx', 'xlsx', 'tar',
-                     'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js']
 
 # --- 5. SITEMAP SCANNER ---
 def fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths=None):
@@ -245,6 +241,8 @@ if start_button:
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
+        st.session_state.crawl_pages = None
+        st.session_state.crawl_meta = None
 
         if mode == "🕷️ Crawl Site":
             seed: set = set()
