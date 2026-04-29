@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from crawler import Crawler as BFSCrawler
-from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl  # build_header + build_export_jsonl used in Task 4 export button
+from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
 # --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", layout="wide")
@@ -174,6 +174,57 @@ def build_gemini_prompt(issues_df):
     return "\n".join(lines)
 
 
+# --- LINKUP EXPORT HELPER ---
+def _render_linkup_export_button(df, crawl_pages, crawl_meta):
+    from datetime import date as _date
+    if df is None or len(df) == 0:
+        return
+    meta = crawl_meta or {}
+    header = build_header(
+        start_url=meta.get("start_url", df["url"].iloc[0] if len(df) > 0 else ""),
+        crawl_mode=meta.get("crawl_mode", "unknown"),
+        max_pages=meta.get("max_pages", len(df)),
+        pages_crawled=len(df),
+        exclude_paths=meta.get("exclude_paths", []),
+        include_paths=[],
+    )
+    if crawl_pages:
+        page_dicts = crawl_pages
+    else:
+        page_dicts = [
+            {
+                "kind": "page",
+                "url": str(row.get("url", "")),
+                "status_code": int(row.get("status", 0) or 0),
+                "title": str(row.get("title", "") or ""),
+                "h1s": [row["h1"]] if row.get("h1") else [],
+                "h2s": [],
+                "meta_description": str(row.get("meta_desc", "") or ""),
+                "canonical": "",
+                "word_count": int(row.get("word_count", 0) or 0),
+                "content_snippet": "",
+                "internal_links": [],
+                "external_links": [],
+                "is_redirect": False,
+                "redirect_chain": [],
+                "images": [],
+                "load_time": None,
+                "error": None,
+            }
+            for _, row in df.iterrows()
+        ]
+    netloc = urlparse(df["url"].iloc[0]).netloc.replace(".", "_") if len(df) > 0 else "site"
+    filename = f"{netloc}_linkup_export_{_date.today()}.jsonl"
+    jsonl_bytes = build_export_jsonl(header, page_dicts).encode("utf-8")
+    st.download_button(
+        "⬇ Export for LinkUpAI (JSONL)",
+        jsonl_bytes,
+        file_name=filename,
+        mime="application/jsonl",
+        use_container_width=True,
+    )
+
+
 # --- 8. APP LAYOUT & UI ---
 st.title("🕷️ Live SEO Crawler")
 st.markdown("Crawl a site or scan a sitemap — detect SEO issues and get AI-powered correction suggestions.")
@@ -331,8 +382,21 @@ if st.session_state.df is not None:
     with tab1:
         st.success(f"✅ {len(df)} pages scanned.")
         st.dataframe(df, use_container_width=True)
-        st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'),
-                           file_name="crawl_results.csv", mime="text/csv")
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                "⬇ Download CSV",
+                df.to_csv(index=False).encode("utf-8"),
+                file_name="crawl_results.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with col_dl2:
+            _render_linkup_export_button(
+                df,
+                st.session_state.crawl_pages,
+                st.session_state.crawl_meta,
+            )
 
     with tab2:
         flagged = issues_df[issues_df['issue_count'] > 0].sort_values('issue_count', ascending=False)
