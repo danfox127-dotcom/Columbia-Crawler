@@ -1,16 +1,14 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
-import sys
-import subprocess
 import json
 import requests
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin, urldefrag
+from urllib.parse import urlparse, urljoin
+from crawler import Crawler as BFSCrawler
+from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
 # --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", layout="wide")
@@ -18,140 +16,6 @@ st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", lay
 # --- 2. CONSTANTS ---
 banned_extensions = ['7z', 'gz', 'txt', 'zip', 'csv', 'pdf', 'docx', 'xlsx', 'tar',
                      'png', 'jpg', 'jpeg', 'gif', 'svg', 'css', 'js']
-
-# --- 3. SCRAPY SPIDER SCRIPT GENERATOR ---
-def create_spider_script(start_url, max_pages, output_file, excluded_paths=None):
-    domain = urlparse(start_url).netloc
-    page_limit_code = ""
-    if max_pages and int(max_pages) > 0:
-        page_limit_code = f"'CLOSESPIDER_PAGECOUNT': {int(max_pages)},"
-
-    deny_patterns = [r'/file/\d+/download']
-    for p in (excluded_paths or []):
-        p = p.strip().strip('/')
-        if p:
-            deny_patterns.append(f'/{p}/')
-
-    script_content = f"""
-import scrapy
-from scrapy.crawler import CrawlerProcess
-from scrapy.spiders import CrawlSpider, Rule
-from scrapy.linkextractors import LinkExtractor
-
-class SEOSitemapSpider(CrawlSpider):
-    name = 'seo_spider'
-    allowed_domains = ['{domain}']
-    start_urls = ['{start_url}']
-
-    rules = (
-        Rule(
-            LinkExtractor(
-                deny_extensions={repr(banned_extensions)},
-                deny={repr(deny_patterns)}
-            ),
-            callback='parse_item',
-            follow=True
-        ),
-    )
-
-    custom_settings = {{
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'ROBOTSTXT_OBEY': False,
-        'DOWNLOAD_MAXSIZE': 5242880,
-        'LOG_LEVEL': 'INFO',
-        'DEPTH_PRIORITY': 1,
-        'SCHEDULER_DISK_QUEUE': 'scrapy.squeues.PickleFifoDiskQueue',
-        'SCHEDULER_MEMORY_QUEUE': 'scrapy.squeues.FifoMemoryQueue',
-        'TELNETCONSOLE_ENABLED': False,
-        'CONCURRENT_REQUESTS': 16,
-        {page_limit_code}
-        'FEEDS': {{
-            '{output_file}': {{'format': 'jsonlines', 'overwrite': True}}
-        }}
-    }}
-
-    def parse_item(self, response):
-        if not hasattr(response, 'css'):
-            return
-        yield {{
-            'url': response.url,
-            'status': response.status,
-            'title': response.css('title::text').get(default='').strip(),
-            'h1': response.css('h1::text').get(default='').strip(),
-            'meta_desc': response.xpath("//meta[@name='description']/@content").get(default='').strip(),
-            'word_count': len(response.xpath('//body//text()').getall())
-        }}
-
-if __name__ == "__main__":
-    process = CrawlerProcess()
-    process.crawl(SEOSitemapSpider)
-    process.start()
-"""
-    with open("spider_script.py", "w", encoding="utf-8") as f:
-        f.write(script_content)
-
-
-# --- 4. REQUESTS FALLBACK CRAWLER ---
-def crawl_with_requests(start_url, max_pages, output_file, excluded_paths=None):
-    domain = urlparse(start_url).netloc
-    excluded = [p.strip().strip('/') for p in (excluded_paths or []) if p.strip()]
-    session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-    q = deque([start_url])
-    visited = set()
-    scraped = 0
-
-    with open(output_file, 'w', encoding='utf-8') as out_f:
-        while q and (scraped < int(max_pages) or int(max_pages) == 0):
-            url = q.popleft()
-            url, _ = urldefrag(url)
-            if url in visited:
-                continue
-            parsed = urlparse(url)
-            if parsed.scheme not in ('http', 'https'):
-                continue
-            if parsed.netloc and not parsed.netloc.endswith(domain):
-                continue
-            path_parts = parsed.path.strip('/').split('/')
-            if excluded and path_parts and path_parts[0] in excluded:
-                continue
-            path_ext = os.path.splitext(parsed.path)[1].lower().lstrip('.')
-            if path_ext and path_ext in banned_extensions:
-                continue
-            try:
-                resp = session.get(url, timeout=12)
-            except Exception:
-                visited.add(url)
-                continue
-            visited.add(url)
-            status = getattr(resp, 'status_code', None) or 0
-            if resp.status_code != 200 or not resp.text:
-                out_f.write(json.dumps({'url': url, 'status': status, 'title': '', 'h1': '', 'meta_desc': '', 'word_count': 0}, ensure_ascii=False) + "\n")
-                continue
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            title = soup.title.string.strip() if soup.title and soup.title.string else ''
-            h1_tag = soup.find('h1')
-            h1 = h1_tag.get_text(strip=True) if h1_tag else ''
-            meta_tag = soup.find('meta', attrs={'name': 'description'})
-            meta_desc = (meta_tag.get('content') or '').strip() if meta_tag else ''
-            body = soup.find('body')
-            word_count = len(body.get_text(separator=' ', strip=True).split()) if body else 0
-            out_f.write(json.dumps({'url': url, 'status': status, 'title': title, 'h1': h1, 'meta_desc': meta_desc, 'word_count': word_count}, ensure_ascii=False) + "\n")
-            scraped += 1
-            for a in soup.find_all('a', href=True):
-                joined = urljoin(url, a['href'])
-                joined, _ = urldefrag(joined)
-                p2 = urlparse(joined)
-                if p2.scheme not in ('http', 'https'):
-                    continue
-                if p2.netloc and not p2.netloc.endswith(domain):
-                    continue
-                ext2 = os.path.splitext(p2.path)[1].lower().lstrip('.')
-                if ext2 and ext2 in banned_extensions:
-                    continue
-                if joined not in visited:
-                    q.append(joined)
-
 
 # --- 5. SITEMAP SCANNER ---
 def fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths=None):
@@ -318,7 +182,7 @@ def build_gemini_prompt(issues_df):
 st.title("🕷️ Live SEO Crawler")
 st.markdown("Crawl a site or scan a sitemap — detect SEO issues and get AI-powered correction suggestions.")
 
-for key in ('df', 'issues_df', 'gemini_response'):
+for key in ('df', 'issues_df', 'gemini_response', 'crawl_pages', 'crawl_meta', 'resume_pages'):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -331,8 +195,22 @@ with st.sidebar:
         max_pages_input = st.number_input(
             "Max pages (0 = unlimited)",
             min_value=0, value=500, step=100,
-            help="~500 pages ≈ 30s | ~5k ≈ 5 min | ~20k ≈ 20 min with Scrapy"
+            help="~500 pages ≈ 30s | ~5k ≈ 5 min | ~20k ≈ 20 min"
         )
+        resume_file = st.file_uploader(
+            "Resume from previous crawl (optional)",
+            type=["jsonl"],
+            help="Upload a previous LinkUpAI export JSONL to skip already-crawled pages.",
+        )
+        if resume_file is not None:
+            try:
+                _, resume_pages = parse_export_jsonl(resume_file.read().decode("utf-8"))
+                st.session_state.resume_pages = resume_pages
+            except Exception:
+                st.warning("Could not parse resume file — starting a fresh crawl.")
+                st.session_state.resume_pages = None
+        else:
+            st.session_state.resume_pages = None
     else:
         target_url = st.text_input("Sitemap URL", value="https://vagelos.columbia.edu/sitemap.xml")
         max_pages_input = st.number_input(
@@ -359,8 +237,6 @@ with st.sidebar:
     )
 
 # --- 9. EXECUTION ---
-output_jsonl = "crawl_output.jsonl"
-
 if start_button:
     if not target_url:
         st.error("Please enter a URL.")
@@ -371,25 +247,53 @@ if start_button:
         st.session_state.gemini_response = None
 
         if mode == "🕷️ Crawl Site":
-            with st.spinner(f"Crawling {target_url}..."):
-                try:
-                    import scrapy  # type: ignore
-                except ModuleNotFoundError:
-                    st.info("Scrapy not available — using fallback crawler.")
-                    try:
-                        crawl_with_requests(target_url, max_pages_input, output_jsonl, excluded_paths)
-                    except Exception as e:
-                        st.error(f"Crawler failed: {e}")
-                else:
-                    create_spider_script(target_url, max_pages_input, output_jsonl, excluded_paths)
-                    result = subprocess.run([sys.executable, "spider_script.py"], capture_output=True, text=True)
-                    if result.returncode != 0:
-                        st.error("Scrapy failed:")
-                        st.code(result.stderr, language="bash")
+            seed: set = set()
+            if st.session_state.resume_pages:
+                seed = {p["url"] for p in st.session_state.resume_pages if p.get("url")}
+                st.info(f"Resuming — skipping {len(seed)} already-crawled pages.")
 
-            if os.path.exists(output_jsonl) and os.path.getsize(output_jsonl) > 0:
-                with open(output_jsonl, 'r', encoding='utf-8') as f:
-                    st.session_state.df = pd.read_json(io.StringIO(f.read()), lines=True)
+            crawler_obj = BFSCrawler(
+                target_url,
+                max_pages=int(max_pages_input) if max_pages_input > 0 else 20000,
+                delay=0.1,
+                exclude_paths=excluded_paths,
+                seed_visited=seed if seed else None,
+            )
+
+            progress_bar = st.progress(0, text="Starting crawl…")
+            page_dicts: list = []
+            rows: list = []
+
+            try:
+                for page, done, remaining in crawler_obj.crawl():
+                    page_dicts.append(page.to_dict())
+                    rows.append({
+                        "url": page.url,
+                        "status": page.status_code,
+                        "title": page.title,
+                        "h1": page.h1s[0] if page.h1s else "",
+                        "meta_desc": page.meta_description,
+                        "word_count": page.word_count,
+                    })
+                    total_est = done + remaining
+                    progress_bar.progress(
+                        done / max(total_est, 1),
+                        text=f"Crawled {done} page(s)…",
+                    )
+            except Exception as e:
+                st.error(f"Crawler error: {e}")
+
+            progress_bar.empty()
+
+            if rows:
+                st.session_state.df = pd.DataFrame(rows)
+                st.session_state.crawl_pages = page_dicts
+                st.session_state.crawl_meta = {
+                    "start_url": target_url,
+                    "crawl_mode": "bfs",
+                    "max_pages": int(max_pages_input) if max_pages_input > 0 else 20000,
+                    "exclude_paths": excluded_paths,
+                }
 
         else:  # Sitemap mode
             st.info(f"Fetching sitemap URLs from {target_url}...")
@@ -404,6 +308,13 @@ if start_button:
                 progress_bar.empty()
                 if not df_sitemap.empty:
                     st.session_state.df = df_sitemap
+                    st.session_state.crawl_pages = None
+                    st.session_state.crawl_meta = {
+                        "start_url": target_url,
+                        "crawl_mode": "sitemap",
+                        "max_pages": int(max_pages_input) if max_pages_input > 0 else 999999,
+                        "exclude_paths": excluded_paths,
+                    }
                 else:
                     st.warning("No URLs found in the sitemap or all were excluded.")
             except Exception as e:
