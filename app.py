@@ -301,8 +301,7 @@ if start_button:
     if not target_url:
         st.error("Please enter a URL.")
     else:
-        excluded_paths = [p for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
-        include_paths = [p for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
+        excluded_paths = [p.strip() for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
@@ -310,6 +309,7 @@ if start_button:
         st.session_state.crawl_meta = None
 
         if mode == "🕷️ Crawl Site":
+            include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
             seed: set = set()
             if st.session_state.resume_pages:
                 seed = {p["url"] for p in st.session_state.resume_pages if p.get("url")}
