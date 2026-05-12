@@ -258,6 +258,20 @@ with st.sidebar:
                 st.session_state.resume_pages = None
         else:
             st.session_state.resume_pages = None
+        st.text_area(
+            "Exclude paths (one per line)",
+            key="exclude_paths_raw",
+            placeholder="/news/\n/events/\n/blog/",
+            help="Top-level folder names to skip, e.g. /news/",
+            height=100,
+        )
+        st.text_area(
+            "Include paths — scan ONLY these (one per line)",
+            key="include_paths_raw",
+            placeholder="/faculty/\n/research/\n/departments/",
+            help="Only crawl URLs whose path contains one of these. Leave blank to crawl everything.",
+            height=100,
+        )
     else:
         target_url = st.text_input("Sitemap URL", value="https://vagelos.columbia.edu/sitemap.xml")
         max_pages_input = st.number_input(
@@ -265,14 +279,13 @@ with st.sidebar:
             min_value=0, value=1000, step=500,
             help="~1k ≈ 2 min | ~5k ≈ 10 min | ~20k ≈ 35 min (10 threads)"
         )
-
-    st.text_area(
-        "Exclude paths (one per line)",
-        key="exclude_paths_raw",
-        placeholder="/news/\n/events/\n/blog/",
-        help="Top-level folder names to skip, e.g. /news/ — applies to both crawl and sitemap modes",
-        height=100,
-    )
+        st.text_area(
+            "Exclude paths (one per line)",
+            key="exclude_paths_raw",
+            placeholder="/news/\n/events/\n/blog/",
+            help="Top-level folder names to skip, e.g. /news/ — applies to sitemap scan",
+            height=100,
+        )
 
     start_button = st.button("🚀 Start", use_container_width=True)
     st.divider()
