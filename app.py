@@ -186,7 +186,7 @@ def _render_linkup_export_button(df, crawl_pages, crawl_meta):
         max_pages=meta.get("max_pages", len(df)),
         pages_crawled=len(df),
         exclude_paths=meta.get("exclude_paths", []),
-        include_paths=[],
+        include_paths=meta.get("include_paths", []),
     )
     if crawl_pages:
         page_dicts = crawl_pages
@@ -302,6 +302,7 @@ if start_button:
         st.error("Please enter a URL.")
     else:
         excluded_paths = [p for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
+        include_paths = [p for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
@@ -319,6 +320,7 @@ if start_button:
                 max_pages=int(max_pages_input) if max_pages_input > 0 else 20000,
                 delay=0.1,
                 exclude_paths=excluded_paths,
+                include_paths=include_paths,
                 seed_visited=seed if seed else None,
             )
 
@@ -355,6 +357,7 @@ if start_button:
                     "crawl_mode": "bfs",
                     "max_pages": int(max_pages_input) if max_pages_input > 0 else 20000,
                     "exclude_paths": excluded_paths,
+                    "include_paths": include_paths,
                 }
 
         else:  # Sitemap mode
