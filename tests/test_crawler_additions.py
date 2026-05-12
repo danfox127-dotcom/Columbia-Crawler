@@ -70,6 +70,58 @@ def test_crawler_none_seed_starts_empty():
     assert len(c.visited) == 0
 
 
+def test_crawler_include_paths_allows_matching_url():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/faculty/"],
+    )
+    assert c._is_crawlable("https://example.com/faculty/jane-doe") is True
+
+
+def test_crawler_include_paths_blocks_non_matching_url():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/faculty/"],
+    )
+    assert c._is_crawlable("https://example.com/news/article") is False
+
+
+def test_crawler_include_paths_always_allows_start_url():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/faculty/"],
+    )
+    # Start URL itself must pass even though it doesn't match /faculty/
+    assert c._is_crawlable("https://example.com") is True
+
+
+def test_crawler_include_paths_empty_allows_all():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=[],
+    )
+    assert c._is_crawlable("https://example.com/anything/here") is True
+
+
+def test_crawler_include_paths_multiple_patterns():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/faculty/", "/research/"],
+    )
+    assert c._is_crawlable("https://example.com/research/cancer") is True
+    assert c._is_crawlable("https://example.com/events/2026") is False
+
+
 def test_crawler_seed_visited_does_not_mutate_caller():
     seeded = {"https://example.com/already-crawled"}
     c = Crawler("https://example.com", max_pages=5, respect_robots=False, seed_visited=seeded)
