@@ -186,7 +186,7 @@ def _render_linkup_export_button(df, crawl_pages, crawl_meta):
         max_pages=meta.get("max_pages", len(df)),
         pages_crawled=len(df),
         exclude_paths=meta.get("exclude_paths", []),
-        include_paths=[],
+        include_paths=meta.get("include_paths", []),
     )
     if crawl_pages:
         page_dicts = crawl_pages
@@ -258,6 +258,20 @@ with st.sidebar:
                 st.session_state.resume_pages = None
         else:
             st.session_state.resume_pages = None
+        st.text_area(
+            "Exclude paths (one per line)",
+            key="exclude_paths_raw",
+            placeholder="/news/\n/events/\n/blog/",
+            help="Top-level folder names to skip, e.g. /news/",
+            height=100,
+        )
+        st.text_area(
+            "Include paths — scan ONLY these (one per line)",
+            key="include_paths_raw",
+            placeholder="/faculty/\n/research/\n/departments/",
+            help="Only crawl URLs whose path contains one of these. Leave blank to crawl everything.",
+            height=100,
+        )
     else:
         target_url = st.text_input("Sitemap URL", value="https://vagelos.columbia.edu/sitemap.xml")
         max_pages_input = st.number_input(
@@ -265,14 +279,13 @@ with st.sidebar:
             min_value=0, value=1000, step=500,
             help="~1k ≈ 2 min | ~5k ≈ 10 min | ~20k ≈ 35 min (10 threads)"
         )
-
-    st.text_area(
-        "Exclude paths (one per line)",
-        key="exclude_paths_raw",
-        placeholder="/news/\n/events/\n/blog/",
-        help="Top-level folder names to skip, e.g. /news/ — applies to both crawl and sitemap modes",
-        height=100,
-    )
+        st.text_area(
+            "Exclude paths (one per line)",
+            key="exclude_paths_raw",
+            placeholder="/news/\n/events/\n/blog/",
+            help="Top-level folder names to skip, e.g. /news/ — applies to sitemap scan",
+            height=100,
+        )
 
     start_button = st.button("🚀 Start", use_container_width=True)
     st.divider()
@@ -288,7 +301,7 @@ if start_button:
     if not target_url:
         st.error("Please enter a URL.")
     else:
-        excluded_paths = [p for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
+        excluded_paths = [p.strip() for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
@@ -296,6 +309,7 @@ if start_button:
         st.session_state.crawl_meta = None
 
         if mode == "🕷️ Crawl Site":
+            include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
             seed: set = set()
             if st.session_state.resume_pages:
                 seed = {p["url"] for p in st.session_state.resume_pages if p.get("url")}
@@ -306,6 +320,7 @@ if start_button:
                 max_pages=int(max_pages_input) if max_pages_input > 0 else 20000,
                 delay=0.1,
                 exclude_paths=excluded_paths,
+                include_paths=include_paths,
                 seed_visited=seed if seed else None,
             )
 
@@ -342,6 +357,7 @@ if start_button:
                     "crawl_mode": "bfs",
                     "max_pages": int(max_pages_input) if max_pages_input > 0 else 20000,
                     "exclude_paths": excluded_paths,
+                    "include_paths": include_paths,
                 }
 
         else:  # Sitemap mode
