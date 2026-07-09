@@ -88,6 +88,7 @@ class Crawler:
         timeout: int = 10,
         exclude_paths: Optional[List[str]] = None,
         include_paths: Optional[List[str]] = None,
+        max_depth: Optional[int] = None,
         seed_visited: Optional[set] = None,
     ):
         self.start_url = start_url.rstrip("/")
@@ -96,6 +97,7 @@ class Crawler:
         self.timeout = timeout
         self.exclude_paths = exclude_paths or []
         self.include_paths = include_paths or []
+        self.max_depth = max_depth
 
         parsed = urlparse(start_url)
         self.base_netloc = parsed.netloc
@@ -148,18 +150,43 @@ class Crawler:
         path = urlparse(url).path.lower()
         if any(path.endswith(ext) for ext in self._EXCLUDED_EXTENSIONS):
             return False
-            
+
+        if self.max_depth is not None and self._path_depth(path) > self.max_depth:
+            return False
+
         for ex in self.exclude_paths:
-            if ex.lower() in path:
+            if self._path_matches(ex, path):
                 return False
-                
+
         if self.include_paths:
             # Always allow the start URL so we can spider from it
             if self._normalize(url) != self._normalize(self.start_url):
-                if not any(inc.lower() in path for inc in self.include_paths):
+                if not any(self._path_matches(inc, path) for inc in self.include_paths):
                     return False
-                    
+
         return True
+
+    @staticmethod
+    def _path_matches(pattern: str, path: str) -> bool:
+        """True if `path` is the folder identified by `pattern` or lives under it.
+
+        Matches by path segment, not raw substring, and is agnostic to trailing
+        slashes on either side (e.g. pattern "/blog/" matches "/blog" and
+        "/blog/post-1", but not "/blogging-tips").
+        """
+        pattern = pattern.strip().lower()
+        if not pattern:
+            return False
+        if not pattern.startswith("/"):
+            pattern = "/" + pattern
+        pattern = pattern.rstrip("/")
+        path = path.rstrip("/")
+        return path == pattern or path.startswith(pattern + "/")
+
+    @staticmethod
+    def _path_depth(path: str) -> int:
+        """Number of non-empty folder segments in a URL path, e.g. /a/b/c -> 3."""
+        return len([seg for seg in path.strip("/").split("/") if seg])
 
     @staticmethod
     def _normalize(url: str) -> str:
@@ -264,17 +291,7 @@ class Crawler:
             c_href = canonical.get("href", "")
             page.canonical = (c_href[0] if isinstance(c_href, list) else c_href).strip()
 
-        # Word count — strip boilerplate first
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
-            tag.decompose()
-        body = soup.find("body")
-        if body:
-            text = body.get_text(separator=" ", strip=True)
-            words = text.split()
-            page.word_count = len(words)
-            page.content_snippet = " ".join(words[:120])  # ~600 chars for AI prompts
-
-        # Images
+        # Images — extracted before boilerplate stripping below
         for img in soup.find_all("img"):
             src_val = img.get("src", "")
             src = (src_val[0] if isinstance(src_val, list) else src_val).strip()
@@ -285,7 +302,9 @@ class Crawler:
             alt = alt_val[0] if isinstance(alt_val, list) else alt_val # type: ignore
             page.images.append(ImageInfo(src=abs_src, alt=alt))
 
-        # Links
+        # Links — extracted before boilerplate stripping below, since nav/header/
+        # footer menus (which get decompose()'d for the word count) are often the
+        # only place a site links out to its subfolders
         for a in soup.find_all("a", href=True):
             href_val = a["href"]
             href = (href_val[0] if isinstance(href_val, list) else href_val).strip()
@@ -299,3 +318,13 @@ class Crawler:
                 page.internal_links.append(abs_href)
             else:
                 page.external_links.append(abs_href)
+
+        # Word count — strip boilerplate first
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
+            tag.decompose()
+        body = soup.find("body")
+        if body:
+            text = body.get_text(separator=" ", strip=True)
+            words = text.split()
+            page.word_count = len(words)
+            page.content_snippet = " ".join(words[:120])  # ~600 chars for AI prompts

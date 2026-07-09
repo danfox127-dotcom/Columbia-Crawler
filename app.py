@@ -244,6 +244,12 @@ with st.sidebar:
             min_value=0, value=500, step=100,
             help="~500 pages ≈ 30s | ~5k ≈ 5 min | ~20k ≈ 20 min"
         )
+        max_depth_input = st.number_input(
+            "Max folder depth (0 = unlimited)",
+            min_value=0, value=0, step=1,
+            help="Limits how many folder levels deep from the site root to crawl, "
+                 "e.g. 2 allows /dept/page but not /dept/sub/page. 0 = no limit.",
+        )
         resume_file = st.file_uploader(
             "Resume from previous crawl (optional)",
             type=["jsonl"],
@@ -321,6 +327,7 @@ if start_button:
                 delay=0.1,
                 exclude_paths=excluded_paths,
                 include_paths=include_paths,
+                max_depth=int(max_depth_input) if max_depth_input > 0 else None,
                 seed_visited=seed if seed else None,
             )
 
@@ -358,6 +365,7 @@ if start_button:
                     "max_pages": int(max_pages_input) if max_pages_input > 0 else 20000,
                     "exclude_paths": excluded_paths,
                     "include_paths": include_paths,
+                    "max_depth": int(max_depth_input) if max_depth_input > 0 else None,
                 }
 
         else:  # Sitemap mode

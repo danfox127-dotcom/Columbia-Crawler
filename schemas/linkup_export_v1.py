@@ -14,6 +14,7 @@ def build_header(
     pages_crawled: int,
     exclude_paths: List[str],
     include_paths: List[str],
+    max_depth: Optional[int] = None,
 ) -> dict:
     return {
         "kind": "header",
@@ -27,6 +28,7 @@ def build_header(
         "pages_crawled": pages_crawled,
         "exclude_paths": exclude_paths,
         "include_paths": include_paths,
+        "max_depth": max_depth,
     }
 
 

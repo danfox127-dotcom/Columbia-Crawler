@@ -122,6 +122,59 @@ def test_crawler_include_paths_multiple_patterns():
     assert c._is_crawlable("https://example.com/events/2026") is False
 
 
+def test_crawler_exclude_paths_does_not_match_substring_prefix():
+    # "/blog" must not exclude "/blogging-tips" — segment match, not substring
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        exclude_paths=["/blog"],
+    )
+    assert c._is_crawlable("https://example.com/blog/post-1") is False
+    assert c._is_crawlable("https://example.com/blogging-tips/post-1") is True
+
+
+def test_crawler_include_paths_does_not_match_substring_prefix():
+    # "/lab" must not match "/laboratory-safety" — segment match, not substring
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/lab"],
+    )
+    assert c._is_crawlable("https://example.com/lab/safety") is True
+    assert c._is_crawlable("https://example.com/laboratory-safety") is False
+
+
+def test_crawler_path_matching_ignores_trailing_slash_either_side():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        include_paths=["/news/"],
+    )
+    # Pattern has a trailing slash; folder's own index URL (no trailing slash
+    # after normalization) must still match, not just its sub-pages.
+    assert c._is_crawlable("https://example.com/news") is True
+    assert c._is_crawlable("https://example.com/news/2026/story") is True
+
+
+def test_crawler_max_depth_limits_subfolder_depth():
+    c = Crawler(
+        "https://example.com",
+        max_pages=5,
+        respect_robots=False,
+        max_depth=2,
+    )
+    assert c._is_crawlable("https://example.com/dept/page") is True
+    assert c._is_crawlable("https://example.com/dept/sub/page") is False
+
+
+def test_crawler_max_depth_none_means_unlimited():
+    c = Crawler("https://example.com", max_pages=5, respect_robots=False)
+    assert c._is_crawlable("https://example.com/a/b/c/d/e") is True
+
+
 def test_crawler_seed_visited_does_not_mutate_caller():
     seeded = {"https://example.com/already-crawled"}
     c = Crawler("https://example.com", max_pages=5, respect_robots=False, seed_visited=seeded)
