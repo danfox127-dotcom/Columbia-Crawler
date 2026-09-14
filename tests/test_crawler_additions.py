@@ -180,3 +180,66 @@ def test_crawler_seed_visited_does_not_mutate_caller():
     c = Crawler("https://example.com", max_pages=5, respect_robots=False, seed_visited=seeded)
     c.visited.add("https://example.com/new-page")
     assert "https://example.com/new-page" not in seeded
+
+
+# ── relative links must resolve against the post-redirect URL ───────────────
+
+class _FakeResponse:
+    """Minimal stand-in for requests.Response as used by Crawler._fetch."""
+
+    def __init__(self, requested_url, final_url, html, history_urls=()):
+        self.url = final_url
+        self.status_code = 200
+        self.headers = {"content-type": "text/html; charset=utf-8"}
+        self.text = html
+        self.history = [
+            type("R", (), {"url": u, "status_code": 301})() for u in history_urls
+        ]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _crawler_with_response(start_url, final_url, html, history_urls=()):
+    c = Crawler(start_url, max_pages=5, respect_robots=False, delay=0)
+    c.session.get = lambda url, **kw: _FakeResponse(url, final_url, html, history_urls)
+    return c
+
+
+def test_fetch_resolves_relative_links_against_final_redirect_url():
+    """A directory URL redirected to its trailing-slash form must not lose the folder."""
+    html = '<html><body><a href="research.php">R</a></body></html>'
+    c = _crawler_with_response(
+        "https://example.com/divisions/kiryluk/",
+        "https://example.com/divisions/kiryluk/",
+        html,
+        history_urls=["https://example.com/divisions/kiryluk"],
+    )
+    page = c._fetch("https://example.com/divisions/kiryluk")
+    assert page.internal_links == ["https://example.com/divisions/kiryluk/research.php"]
+
+
+def test_fetch_resolves_relative_images_against_final_redirect_url():
+    html = '<html><body><img src="img/photo.jpg" alt="p"></body></html>'
+    c = _crawler_with_response(
+        "https://example.com/divisions/kiryluk/",
+        "https://example.com/divisions/kiryluk/",
+        html,
+        history_urls=["https://example.com/divisions/kiryluk"],
+    )
+    page = c._fetch("https://example.com/divisions/kiryluk")
+    assert page.images[0].src == "https://example.com/divisions/kiryluk/img/photo.jpg"
+
+
+def test_fetch_uses_requested_url_when_no_redirect():
+    html = '<html><body><a href="research.php">R</a></body></html>'
+    c = _crawler_with_response(
+        "https://example.com/divisions/kiryluk/",
+        "https://example.com/divisions/kiryluk/page.php",
+        html,
+    )
+    page = c._fetch("https://example.com/divisions/kiryluk/page.php")
+    assert page.internal_links == ["https://example.com/divisions/kiryluk/research.php"]

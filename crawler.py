@@ -237,8 +237,13 @@ class Crawler:
                     return page
 
                 html = resp.text
+                # Relative links/images must resolve against the URL the content
+                # actually came from. A directory URL like /divisions/kiryluk
+                # 301s to /divisions/kiryluk/, and resolving "research.php"
+                # against the pre-redirect form silently drops the folder.
+                base_url = resp.url or url
 
-            self._parse(page, html, url)
+            self._parse(page, html, base_url)
 
         except requests.Timeout:
             page.load_time = time.time() - t0
