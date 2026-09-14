@@ -158,8 +158,53 @@ Surveyed during brainstorming, deliberately out of scope:
 - **Vectorizing `detect_seo_issues`.** Currently `df.iterrows()`; invisible
   below ~1k pages.
 
-## Expected outcome
+## Measured results (2026-09-14, post-implementation)
 
-4–6x on a 500-page crawl at 8 workers — rate limiting consumes some of the
-theoretical 8x. Re-crawls of a known site approach 304-validation speed while
-producing a complete report rather than a partial one.
+30 pages of `columbiamedicine.org/divisions/kiryluk/`, wall clock:
+
+| workers | delay | time | ms/page |
+|---|---|---|---|
+| 1 | 0.10 | 3.03 s | 101 |
+| 8 | 0.10 | 3.14 s | 105 |
+| 8 | 0.05 | 1.61 s | 54 |
+| 8 | 0.00 | 0.47 s | 16 |
+| 1 | 0.00 | 1.53 s | 51 |
+
+**The politeness delay, not the worker count, is the binding constraint.** This
+host answers in ~50 ms, so a 0.1 s shared minimum interval caps the crawl at 10
+pages/sec regardless of worker count — at `delay=0.1` the 8-worker run is no
+faster than serial. With the gate open the parallel win is real: **3.3x**
+(1.53 s → 0.47 s). The design's original 4–6x estimate assumed the 200–400 ms
+per-page latency measured on a cold single request; warm, this host is ~4x
+faster than that, which moves the bottleneck onto the gate.
+
+Consequence for the UI: `delay` is exposed as a control rather than hard-coded
+at 0.1, because it is the knob that actually governs throughput. Default stays
+0.1 (unchanged request rate against Columbia hosts); 0.02–0.05 unlocks the
+parallel gain on servers known to tolerate it.
+
+**Conditional requests are host-dependent:**
+
+- `columbiamedicine.org` sends no `ETag` and no `Last-Modified` at all, so
+  revalidation is a no-op there and re-crawls cost full downloads.
+- `www.vagelos.columbia.edu` (nginx/Drupal) sends both, and the crawler earns
+  real 304 reuse — but only intermittently (3 of 6 identical warm requests),
+  with `X-Drupal-Cache: MISS` on the 200s. The ETag itself is stable across 12
+  requests, so this is the origin alternating between backends that do and do
+  not honour the validator, not a client-side defect.
+- `www.columbia.edu` (Cloudflare) sends no validators either.
+
+Savings on re-crawls therefore range from zero to substantial depending on the
+host. The completeness benefit — cached pages appearing in the report and their
+stored links keeping the spider moving — applies regardless.
+
+## Known issue found during verification (out of scope, not fixed)
+
+`_same_domain` compares against `base_netloc` taken from the **start** URL, so a
+host that redirects www/non-www breaks the crawl. `https://vagelos.columbia.edu`
+301s to `https://www.vagelos.columbia.edu`, whose absolute links are then all
+classified external: 109 external links, 0 internal, crawl ends after 1 page.
+This affects the app's own default start URL. It is the same class of bug as the
+post-redirect base-URL fix in `8c9d7d4` and needs a decision on intended
+semantics (adopt the post-redirect host? treat www and non-www as one site?)
+before being fixed.
