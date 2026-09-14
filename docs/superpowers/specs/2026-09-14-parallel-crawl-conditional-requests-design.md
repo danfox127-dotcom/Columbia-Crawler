@@ -198,13 +198,25 @@ Savings on re-crawls therefore range from zero to substantial depending on the
 host. The completeness benefit — cached pages appearing in the report and their
 stored links keeping the spider moving — applies regardless.
 
-## Known issue found during verification (out of scope, not fixed)
+## §4 Host scope — found during verification, fixed
 
 `_same_domain` compares against `base_netloc` taken from the **start** URL, so a
 host that redirects www/non-www breaks the crawl. `https://vagelos.columbia.edu`
 301s to `https://www.vagelos.columbia.edu`, whose absolute links are then all
 classified external: 109 external links, 0 internal, crawl ends after 1 page.
-This affects the app's own default start URL. It is the same class of bug as the
-post-redirect base-URL fix in `8c9d7d4` and needs a decision on intended
-semantics (adopt the post-redirect host? treat www and non-www as one site?)
-before being fixed.
+This affected the app's own default start URL — the same class of bug as the
+post-redirect base-URL fix in `8c9d7d4`.
+
+Resolved with both halves of the semantics:
+
+- `_host_key` folds `www.` and case, so `example.com` and `www.example.com` are
+  one site. Other subdomains (`blog.example.com`) stay external.
+- `_adopt_redirect_host` takes the **start URL's** post-redirect host as the site
+  under crawl, so a start URL that redirects cross-domain still spiders. Scoped
+  to the start URL: a later page redirecting off-site cannot widen the crawl.
+- `_dedupe_key` folds the www variant for `visited` membership so one page is not
+  crawled and reported twice, while the reported URL stays the one actually
+  fetched.
+
+Verified live: `https://vagelos.columbia.edu` went from **1 page** (82 internal
+links misfiled as external) to 15 pages with no duplicate row.

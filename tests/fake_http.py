@@ -25,7 +25,8 @@ class FakeResponse:
         return False
 
 
-def page(links=(), status=200, etag=None, last_modified=None, gate=None, always_304=False):
+def page(links=(), status=200, etag=None, last_modified=None, gate=None, always_304=False,
+         redirect_to=None):
     """Spec for one fake page. `gate` is a threading.Event the request waits on."""
     body = "".join(f'<a href="{href}">x</a>' for href in links)
     return {
@@ -35,6 +36,7 @@ def page(links=(), status=200, etag=None, last_modified=None, gate=None, always_
         "last_modified": last_modified,
         "gate": gate,
         "always_304": always_304,
+        "redirect_to": redirect_to,
     }
 
 
@@ -74,6 +76,16 @@ class FakeSite:
                 spec["gate"].wait(timeout=5)
             if self.latency:
                 time.sleep(self.latency)
+
+            target = spec.get("redirect_to")
+            if target:
+                dest = self.pages.get(target)
+                return FakeResponse(
+                    target, 200,
+                    {"content-type": "text/html; charset=utf-8"},
+                    dest["html"] if dest else "",
+                    history_urls=[url],
+                )
 
             if spec.get("always_304"):
                 return FakeResponse(url, 304, {}, "")

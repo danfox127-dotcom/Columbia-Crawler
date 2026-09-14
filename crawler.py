@@ -162,7 +162,9 @@ class Crawler:
         parsed = urlparse(start_url)
         self.base_netloc = parsed.netloc
 
-        self.visited: "set[str]" = set(seed_visited) if seed_visited is not None else set()
+        self.visited: "set[str]" = (
+            {self._dedupe_key(u) for u in seed_visited} if seed_visited is not None else set()
+        )
         self.queue: "deque[str]" = deque([self.start_url])
 
         # Guards visited / queue / the counters below, all of which are touched
@@ -226,7 +228,29 @@ class Crawler:
     # ── URL helpers ─────────────────────────────────────────────────────────
 
     def _same_domain(self, url: str) -> bool:
-        return urlparse(url).netloc == self.base_netloc
+        return self._host_key(urlparse(url).netloc) == self._host_key(self.base_netloc)
+
+    @staticmethod
+    def _host_key(netloc: str) -> str:
+        """Host identity for same-site checks: case-folded, www-agnostic.
+
+        A site that serves both example.com and www.example.com is one site;
+        treating them as two classifies every link as external.
+        """
+        host = (netloc or "").lower()
+        return host[4:] if host.startswith("www.") else host
+
+    def _adopt_redirect_host(self, final_url: str) -> None:
+        """Take the start URL's post-redirect host as the site being crawled.
+
+        vagelos.columbia.edu 301s to www.vagelos.columbia.edu; without this the
+        delivered page's absolute links all look external and the crawl ends
+        after one page. Scoped to the start URL so a later page redirecting
+        off-site cannot widen the crawl.
+        """
+        final_netloc = urlparse(final_url).netloc
+        if final_netloc and self._host_key(final_netloc) != self._host_key(self.base_netloc):
+            self.base_netloc = final_netloc
 
     def _is_crawlable(self, url: str) -> bool:
         path = urlparse(url).path.lower()
@@ -275,6 +299,14 @@ class Crawler:
         p = urlparse(url)
         return p._replace(fragment="").geturl().rstrip("/")
 
+    def _dedupe_key(self, url: str) -> str:
+        """Identity used for `visited`. Folds the www variant onto the bare host
+        so one page does not get crawled and reported twice; the URL we report
+        stays whatever we actually fetched.
+        """
+        p = urlparse(self._normalize(url))
+        return p._replace(netloc=self._host_key(p.netloc)).geturl()
+
     # ── Public crawl interface ───────────────────────────────────────────────
 
     def crawl(self) -> Generator[Tuple[PageData, int, int], None, None]:
@@ -321,9 +353,10 @@ class Crawler:
                 if self.claimed >= self.max_pages:
                     return None
                 url = self._normalize(self.queue.popleft())
-                if url in self.visited or not self._can_fetch(url):
+                key = self._dedupe_key(url)
+                if key in self.visited or not self._can_fetch(url):
                     continue
-                self.visited.add(url)
+                self.visited.add(key)
                 self.claimed += 1
                 return url
         return None
@@ -332,7 +365,7 @@ class Crawler:
         with self.lock:
             for link in page.internal_links:
                 norm = self._normalize(link)
-                if norm not in self.visited and self._is_crawlable(norm):
+                if self._dedupe_key(norm) not in self.visited and self._is_crawlable(norm):
                     self.queue.append(norm)
 
     def _fetch_guarded(self, url: str) -> PageData:
@@ -404,6 +437,8 @@ class Crawler:
                 if resp.history:
                     page.is_redirect = True
                     page.redirect_chain = [r.url for r in resp.history] + [resp.url]
+                    if self._normalize(url) == self._normalize(self.start_url):
+                        self._adopt_redirect_host(resp.url)
 
                 if resp.status_code == 304:
                     # Unchanged: reuse the stored record wholesale, keeping its
