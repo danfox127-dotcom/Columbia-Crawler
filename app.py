@@ -242,7 +242,7 @@ with st.sidebar:
         max_pages_input = st.number_input(
             "Max pages (0 = unlimited)",
             min_value=0, value=500, step=100,
-            help="~500 pages ≈ 30s | ~5k ≈ 5 min | ~20k ≈ 20 min"
+            help="~500 pages ≈ 10s | ~5k ≈ 1.5 min | ~20k ≈ 6 min (8 parallel)"
         )
         max_depth_input = st.number_input(
             "Max folder depth (0 = unlimited)",
@@ -250,10 +250,25 @@ with st.sidebar:
             help="Limits how many folder levels deep from the site root to crawl, "
                  "e.g. 2 allows /dept/page but not /dept/sub/page. 0 = no limit.",
         )
+        max_workers_input = st.slider(
+            "Parallel requests", min_value=1, max_value=16, value=8,
+            help="How many pages to fetch at once. Lower this if the site starts "
+                 "returning 429 or 503 — the crawler also backs off on its own.",
+        )
+        delay_input = st.number_input(
+            "Politeness delay (seconds)",
+            min_value=0.0, max_value=2.0, value=0.1, step=0.05, format="%.2f",
+            help="Minimum gap between request starts, shared across all workers, and "
+                 "the usual speed ceiling: at 0.10s no worker count exceeds 10 pages/sec. "
+                 "Drop it to 0.02–0.05 on servers you know tolerate it. robots.txt "
+                 "Crawl-delay overrides this when it asks for more.",
+        )
         resume_file = st.file_uploader(
             "Resume from previous crawl (optional)",
             type=["jsonl"],
-            help="Upload a previous LinkUpAI export JSONL to skip already-crawled pages.",
+            help="Upload a previous LinkUpAI export JSONL. Unchanged pages are "
+                 "revalidated with ETag/Last-Modified and reused, so a re-crawl "
+                 "is fast and the report stays complete.",
         )
         if resume_file is not None:
             try:
@@ -316,19 +331,25 @@ if start_button:
 
         if mode == "🕷️ Crawl Site":
             include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
-            seed: set = set()
+            cached_pages: dict = {}
             if st.session_state.resume_pages:
-                seed = {p["url"] for p in st.session_state.resume_pages if p.get("url")}
-                st.info(f"Resuming — skipping {len(seed)} already-crawled pages.")
+                cached_pages = {
+                    p["url"]: p for p in st.session_state.resume_pages if p.get("url")
+                }
+                st.info(
+                    f"Resuming — revalidating {len(cached_pages)} known page(s); "
+                    "unchanged ones are reused without a full download."
+                )
 
             crawler_obj = BFSCrawler(
                 target_url,
                 max_pages=int(max_pages_input) if max_pages_input > 0 else 20000,
-                delay=0.1,
+                delay=float(delay_input),
                 exclude_paths=excluded_paths,
                 include_paths=include_paths,
                 max_depth=int(max_depth_input) if max_depth_input > 0 else None,
-                seed_visited=seed if seed else None,
+                max_workers=int(max_workers_input),
+                cached_pages=cached_pages or None,
             )
 
             progress_bar = st.progress(0, text="Starting crawl…")
@@ -355,6 +376,10 @@ if start_button:
                 st.error(f"Crawler error: {e}")
 
             progress_bar.empty()
+
+            reused = sum(1 for p in page_dicts if p.get("from_cache"))
+            if reused:
+                st.success(f"{reused} of {len(page_dicts)} page(s) unchanged since the last crawl.")
 
             if rows:
                 st.session_state.df = pd.DataFrame(rows)
