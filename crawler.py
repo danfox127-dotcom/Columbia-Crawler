@@ -123,6 +123,10 @@ class Crawler:
         )
     }
 
+    # robots.txt Crawl-delay is honoured but bounded: www.vagelos.columbia.edu
+    # declares 10s, which would put a 500-page audit at ~83 minutes.
+    _ROBOTS_DELAY_CAP = 1.0
+
     _EXCLUDED_EXTENSIONS = {
         ".css", ".js", ".json", ".xml", ".pdf", ".zip", ".rar", ".gz", ".tar",
         ".mp3", ".mp4", ".avi", ".mov", ".jpg", ".jpeg", ".png", ".gif", ".svg",
@@ -209,15 +213,18 @@ class Crawler:
             pass
 
     def _apply_robots_delay(self, robots) -> None:
-        """Raise the minimum interval to robots.txt Crawl-delay when it asks for
-        more than we were already giving. Never lowers a configured delay."""
+        """Raise the minimum interval toward robots.txt Crawl-delay, bounded by
+        _ROBOTS_DELAY_CAP. Never lowers a delay the caller configured."""
         try:
             declared = robots.crawl_delay("*")
         except Exception:
             return
-        if declared and float(declared) > self.limiter.baseline:
-            self.limiter.baseline = float(declared)
-            self.limiter.interval = float(declared)
+        if not declared:
+            return
+        wanted = min(float(declared), self._ROBOTS_DELAY_CAP)
+        if wanted > self.limiter.baseline:
+            self.limiter.baseline = wanted
+            self.limiter.interval = wanted
 
     def _can_fetch(self, url: str) -> bool:
         robots = self.robots

@@ -105,3 +105,26 @@ def test_missing_robots_crawl_delay_leaves_interval_alone():
     c = Crawler(BASE, respect_robots=False, delay=0.2)
     c._apply_robots_delay(_FakeRobots(None))
     assert c.limiter.baseline == 0.2
+
+
+# ── robots Crawl-delay is honoured but bounded ──────────────────────────────
+
+def test_robots_crawl_delay_is_capped():
+    """Columbia hosts declare Crawl-delay: 10, which would put a 500-page audit
+    at ~83 minutes. Honour the directive, but bound it."""
+    c = Crawler(BASE, respect_robots=False, delay=0.1)
+    c._apply_robots_delay(_FakeRobots(10))
+    assert c.limiter.baseline == Crawler._ROBOTS_DELAY_CAP
+    assert c.limiter.interval == Crawler._ROBOTS_DELAY_CAP
+
+
+def test_robots_crawl_delay_below_the_cap_is_honoured_in_full():
+    c = Crawler(BASE, respect_robots=False, delay=0.1)
+    c._apply_robots_delay(_FakeRobots(0.4))
+    assert c.limiter.baseline == 0.4
+
+
+def test_configured_delay_above_the_cap_is_not_lowered():
+    c = Crawler(BASE, respect_robots=False, delay=1.5)
+    c._apply_robots_delay(_FakeRobots(10))
+    assert c.limiter.baseline == 1.5
