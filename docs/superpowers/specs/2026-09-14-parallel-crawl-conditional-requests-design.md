@@ -73,8 +73,13 @@ runs should be compared.
 
 A per-host token bucket, consulted inside the worker before `session.get`:
 
-- Minimum interval is `max(user delay, robots.txt Crawl-delay)`. The existing
-  `RobotFileParser` already exposes `crawl_delay()`; it is currently unused.
+- Minimum interval is `max(user delay, min(robots.txt Crawl-delay, 1.0s))`. The
+  existing `RobotFileParser` already exposes `crawl_delay()`; it was unused.
+  The 1 s cap (`_ROBOTS_DELAY_CAP`) was added after deployment testing:
+  `www.vagelos.columbia.edu` declares `Crawl-delay: 10`, and `app.py` leaves
+  `respect_robots=True`, so honouring it unbounded put a 500-page audit at ~83
+  minutes — a 100x regression against the pre-existing 0.1 s. A delay the caller
+  configured above the cap is still never lowered.
 - On `429` or `503`, double the interval (capped at ~2 s), decaying back toward
   baseline after sustained 2xx responses.
 
