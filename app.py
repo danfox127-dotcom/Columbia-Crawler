@@ -422,6 +422,9 @@ if start_button:
             st.session_state.issues_df = detect_seo_issues(st.session_state.df)
 
 # --- 10. DISPLAY RESULTS ---
+# Display-only: makes the url column clickable. Exports are unaffected.
+_URL_LINK_COL = {"url": st.column_config.LinkColumn("url")}
+
 if st.session_state.df is not None:
     df = st.session_state.df
     issues_df = st.session_state.issues_df
@@ -430,7 +433,7 @@ if st.session_state.df is not None:
 
     with tab1:
         st.success(f"✅ {len(df)} pages scanned.")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, use_container_width=True, column_config=_URL_LINK_COL)
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
@@ -470,7 +473,8 @@ if st.session_state.df is not None:
             )
             st.subheader("Flagged Pages")
             st.dataframe(flagged[['url', 'title', 'meta_desc', 'h1', 'word_count', 'issues']],
-                         use_container_width=True, hide_index=True)
+                         use_container_width=True, hide_index=True,
+                         column_config=_URL_LINK_COL)
             st.download_button("Download Issues CSV",
                                flagged.to_csv(index=False).encode('utf-8'),
                                file_name="seo_issues.csv", mime="text/csv")
@@ -490,6 +494,7 @@ if st.session_state.df is not None:
                 hide_index=False,
                 on_select="rerun",
                 selection_mode="multi-row",
+                column_config=_URL_LINK_COL,
             )
 
             selected_indices = selection.selection.rows if selection.selection.rows else []
