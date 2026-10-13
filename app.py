@@ -3,90 +3,22 @@ import pandas as pd
 import os
 import json
 import requests
-import xml.etree.ElementTree as ET
-from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
 from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler
+from sitemap import check_url, fetch_sitemap_urls
 from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
 # --- 1. SET PAGE CONFIG ---
 st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", layout="wide")
 
 # --- 5. SITEMAP SCANNER ---
-def fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths=None):
-    """Recursively fetch all <loc> URLs from a sitemap or sitemap index."""
-    excluded = [p.strip().strip('/') for p in (excluded_paths or []) if p.strip()]
-    urls = []
-    seen_sitemaps = set()
-
-    def _fetch(url, depth=0):
-        if depth > 4 or url in seen_sitemaps or len(urls) >= max_urls:
-            return
-        seen_sitemaps.add(url)
-        try:
-            resp = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-            resp.raise_for_status()
-        except Exception:
-            return
-        try:
-            root = ET.fromstring(resp.content)
-        except ET.ParseError:
-            return
-
-        ns = root.tag.split('}')[0].lstrip('{') if '}' in root.tag else ''
-        pre = f'{{{ns}}}' if ns else ''
-        tag = root.tag.split('}')[-1]
-
-        if tag == 'sitemapindex':
-            for sm in root.findall(f'{pre}sitemap'):
-                loc = sm.find(f'{pre}loc')
-                if loc is not None and loc.text:
-                    _fetch(loc.text.strip(), depth + 1)
-                    if len(urls) >= max_urls:
-                        return
-        else:  # urlset
-            for url_el in root.findall(f'{pre}url'):
-                loc = url_el.find(f'{pre}loc')
-                if loc is None or not loc.text:
-                    continue
-                page_url = loc.text.strip()
-                parsed = urlparse(page_url)
-                path_parts = parsed.path.strip('/').split('/')
-                if excluded and path_parts and path_parts[0] in excluded:
-                    continue
-                urls.append(page_url)
-                if len(urls) >= max_urls:
-                    return
-
-    _fetch(sitemap_url)
-    return urls
-
-
-def _check_url(args):
-    url, session = args
-    try:
-        resp = session.get(url, timeout=10)
-        status = resp.status_code
-        if status != 200 or not resp.text:
-            return {'url': url, 'status': status, 'title': '', 'h1': '', 'meta_desc': '', 'word_count': 0}
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        title = soup.title.string.strip() if soup.title and soup.title.string else ''
-        h1_tag = soup.find('h1')
-        h1 = h1_tag.get_text(strip=True) if h1_tag else ''
-        meta_tag = soup.find('meta', attrs={'name': 'description'})
-        meta_desc = (meta_tag.get('content') or '').strip() if meta_tag else ''
-        body = soup.find('body')
-        word_count = len(body.get_text(separator=' ', strip=True).split()) if body else 0
-        return {'url': url, 'status': status, 'title': title, 'h1': h1, 'meta_desc': meta_desc, 'word_count': word_count}
-    except Exception:
-        return {'url': url, 'status': 0, 'title': '', 'h1': '', 'meta_desc': '', 'word_count': 0}
-
-
-def scan_sitemap(sitemap_url, max_urls, excluded_paths, progress_bar):
-    urls = fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths)
+def scan_sitemap(sitemap_url, max_urls, excluded_paths, included_paths, progress_bar):
+    """Returns (DataFrame, url_count, warnings, blocked_count)."""
+    found = fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths, included_paths)
+    urls = found.urls
     if not urls:
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, found.warnings, 0
 
     session = requests.Session()
     session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
@@ -94,14 +26,15 @@ def scan_sitemap(sitemap_url, max_urls, excluded_paths, progress_bar):
     completed = 0
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_idx = {executor.submit(_check_url, (url, session)): i for i, url in enumerate(urls)}
+        future_to_idx = {executor.submit(check_url, url, session): i for i, url in enumerate(urls)}
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             results[idx] = future.result()
             completed += 1
             progress_bar.progress(completed / len(urls), text=f"Checked {completed}/{len(urls)} URLs")
 
-    return pd.DataFrame(results), len(urls)
+    blocked = sum(1 for r in results if r.pop("error") == CHALLENGE_ERROR)
+    return pd.DataFrame(results), len(urls), found.warnings, blocked
 
 
 # --- 6. SEO ISSUE DETECTION ---
@@ -306,7 +239,15 @@ with st.sidebar:
             "Exclude paths (one per line)",
             key="exclude_paths_raw",
             placeholder="/news/\n/events/\n/blog/",
-            help="Top-level folder names to skip, e.g. /news/ — applies to sitemap scan",
+            help="Folders to skip, e.g. /news/ or /specialties/cancer/ — applies to sitemap scan",
+            height=100,
+        )
+        st.text_area(
+            "Include paths — scan ONLY these (one per line)",
+            key="include_paths_raw",
+            placeholder="/faculty/\n/research/\n/departments/",
+            help="Only check sitemap URLs in these folders. Must match the site's URLs "
+                 "exactly. Leave blank to check everything.",
             height=100,
         )
 
@@ -325,6 +266,7 @@ if start_button:
         st.error("Please enter a URL.")
     else:
         excluded_paths = [p.strip() for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
+        include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
@@ -332,7 +274,6 @@ if start_button:
         st.session_state.crawl_meta = None
 
         if mode == "🕷️ Crawl Site":
-            include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
             cached_pages: dict = {}
             if st.session_state.resume_pages:
                 cached_pages = {
@@ -416,13 +357,22 @@ if start_button:
             st.info(f"Fetching sitemap URLs from {target_url}...")
             progress_bar = st.progress(0, text="Starting...")
             try:
-                df_sitemap, total = scan_sitemap(
+                df_sitemap, total, sitemap_warnings, blocked = scan_sitemap(
                     target_url,
                     int(max_pages_input) if max_pages_input > 0 else 999999,
                     excluded_paths,
+                    include_paths,
                     progress_bar
                 )
                 progress_bar.empty()
+                for warning in sitemap_warnings:
+                    st.warning(warning)
+                if blocked:
+                    st.error(
+                        f"{blocked} of {total} page(s) were blocked by Cloudflare's bot "
+                        "challenge. The site's owners need to allow automated access "
+                        "in their Cloudflare settings before it can be audited."
+                    )
                 if not df_sitemap.empty:
                     st.session_state.df = df_sitemap
                     st.session_state.crawl_pages = None
@@ -431,14 +381,21 @@ if start_button:
                         "crawl_mode": "sitemap",
                         "max_pages": int(max_pages_input) if max_pages_input > 0 else 999999,
                         "exclude_paths": excluded_paths,
+                        "include_paths": include_paths,
                     }
-                else:
+                elif not sitemap_warnings:
                     st.warning("No URLs found in the sitemap or all were excluded.")
             except Exception as e:
                 st.error(f"Sitemap scan failed: {e}")
 
         if st.session_state.df is not None:
             st.session_state.issues_df = detect_seo_issues(st.session_state.df)
+            protected = int((st.session_state.df["status"] == 401).sum())
+            if protected:
+                st.warning(
+                    f"{protected} page(s) returned 401: they're password-protected, so "
+                    "their content couldn't be audited."
+                )
 
 # --- 10. DISPLAY RESULTS ---
 # Display-only: makes the url column clickable. Exports are unaffected.

@@ -406,8 +406,9 @@ class Crawler:
 
         for inc in self._unconfirmed_includes:
             self.warnings.append(
-                f"No pages under include path {inc} loaded successfully. "
-                "Check the folder name is spelled as it appears in the site's URLs."
+                f"No pages under include path {inc} loaded successfully. Check its "
+                "status in the results: 404 usually means a misspelled folder, "
+                "401 a password-protected one."
             )
 
     def _confirm_includes(self, page: PageData) -> None:
