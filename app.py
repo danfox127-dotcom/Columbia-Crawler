@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
-from crawler import Crawler as BFSCrawler
+from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler
 from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
 # --- 1. SET PAGE CONFIG ---
@@ -376,6 +376,23 @@ if start_button:
                 st.error(f"Crawler error: {e}")
 
             progress_bar.empty()
+
+            for warning in crawler_obj.warnings:
+                st.warning(warning)
+
+            blocked = sum(1 for p in page_dicts if p.get("error") == CHALLENGE_ERROR)
+            if blocked:
+                st.error(
+                    f"{blocked} of {len(page_dicts)} page(s) were blocked by Cloudflare's "
+                    "bot challenge. The site's owners need to allow this crawler "
+                    f"(User-Agent `{BFSCrawler._HEADERS['User-Agent']}`) in their "
+                    "Cloudflare settings before it can be audited."
+                )
+            elif not page_dicts and not crawler_obj.warnings:
+                st.warning(
+                    "No pages were crawled. Check the start URL and any include/exclude "
+                    "paths or depth limit."
+                )
 
             reused = sum(1 for p in page_dicts if p.get("from_cache"))
             if reused:
