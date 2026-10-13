@@ -267,11 +267,14 @@ with st.sidebar:
     start_button = st.button("🚀 Start", use_container_width=True)
     st.divider()
     st.header("🤖 Gemini Settings")
+    # Never pre-fill from the secret: a password box only masks the text, and
+    # on a public Space anyone could reveal it.
     gemini_key = st.text_input(
         "Gemini API Key", type="password",
-        value=os.environ.get("GEMINI_API_KEY", ""),
         help="Set GEMINI_API_KEY in HF Secrets or paste here"
-    )
+    ) or os.environ.get("GEMINI_API_KEY", "")
+    if os.environ.get("GEMINI_API_KEY"):
+        st.caption("Leave blank to use the key saved in Space secrets.")
 
 # --- 9. EXECUTION ---
 if start_button:
