@@ -206,6 +206,7 @@ class Crawler:
         max_workers: int = 8,
         cached_pages: Optional[dict] = None,
         auth: Optional[Tuple[str, str]] = None,
+        honor_crawl_delay: bool = True,
     ):
         self.start_url = start_url.rstrip("/")
         self.max_pages = max_pages
@@ -215,6 +216,9 @@ class Crawler:
         self.include_paths = include_paths or []
         self.max_depth = max_depth
         self.max_workers = max(1, int(max_workers))
+        # Off = obey robots.txt Disallow rules but not its Crawl-delay, as
+        # Screaming Frog does. Drupal's stock robots.txt asks for 10s.
+        self.honor_crawl_delay = honor_crawl_delay
         self.limiter = _RateLimiter(delay)
         # url -> previously exported page dict, used to revalidate instead of
         # refetching. Keys are normalized so a stored "/a/" matches a crawled "/a".
@@ -315,7 +319,8 @@ class Crawler:
             rp.parse(resp.text.splitlines())
 
         self.robots = rp
-        self._apply_robots_delay(rp)
+        if self.honor_crawl_delay:
+            self._apply_robots_delay(rp)
 
     def _apply_robots_delay(self, robots) -> None:
         """Raise the minimum interval toward robots.txt Crawl-delay, bounded by
