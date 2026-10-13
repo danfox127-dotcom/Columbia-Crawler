@@ -28,6 +28,28 @@ def _is_bot_challenge(resp) -> bool:
     return (resp.headers.get("cf-mitigated") or "").strip().lower() == "challenge"
 
 
+class SiteBasicAuth(requests.auth.AuthBase):
+    """HTTP Basic credentials for password-protected sections (e.g. Drupal
+    Shield), sent only to the audited site's host and only over HTTPS."""
+
+    def __init__(self, site_url: str, username: str, password: str):
+        self.host_key = Crawler._host_key(urlparse(site_url).netloc)
+        self._header = requests.auth._basic_auth_str(username, password)
+
+    def __call__(self, r):
+        parsed = urlparse(r.url)
+        if parsed.scheme == "https" and Crawler._host_key(parsed.netloc) == self.host_key:
+            r.headers["Authorization"] = self._header
+        return r
+
+
+def make_site_auth(site_url: str, auth: Optional[Tuple[str, str]]) -> Optional[SiteBasicAuth]:
+    """SiteBasicAuth for (username, password), or None if either is blank."""
+    if not auth or not auth[0] or not auth[1]:
+        return None
+    return SiteBasicAuth(site_url, auth[0], auth[1])
+
+
 @dataclass
 class ImageInfo:
     src: str
@@ -156,6 +178,7 @@ class Crawler:
         seed_visited: Optional[set] = None,
         max_workers: int = 8,
         cached_pages: Optional[dict] = None,
+        auth: Optional[Tuple[str, str]] = None,
     ):
         self.start_url = start_url.rstrip("/")
         self.max_pages = max_pages
@@ -201,6 +224,7 @@ class Crawler:
 
         self.session = requests.Session()
         self.session.headers.update(self._HEADERS)
+        self.session.auth = make_site_auth(start_url, auth)
         
         # Robustness: Auto-retry on transient errors or rate limits
         retries = Retry(
