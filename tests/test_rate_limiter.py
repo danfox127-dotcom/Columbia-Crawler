@@ -128,3 +128,34 @@ def test_configured_delay_above_the_cap_is_not_lowered():
     c = Crawler(BASE, respect_robots=False, delay=1.5)
     c._apply_robots_delay(_FakeRobots(10))
     assert c.limiter.baseline == 1.5
+
+
+# ── Crawl-delay can be switched off; disallow rules still apply ─────────────
+
+def _robots_crawler(robots_txt, **kw):
+    c = Crawler(BASE, respect_robots=False, delay=0.1, **kw)
+    robots_url = f"{BASE}/robots.txt"
+    c.session.get = FakeSite(
+        {robots_url: {**page(), "html": robots_txt}}
+    ).get
+    c._load_robots(BASE)
+    return c
+
+
+_ROBOTS = "User-agent: *\nCrawl-delay: 10\nDisallow: /private/\n"
+
+
+def test_crawl_delay_honoured_by_default():
+    c = _robots_crawler(_ROBOTS)
+    assert c.limiter.interval == Crawler._ROBOTS_DELAY_CAP
+
+
+def test_crawl_delay_ignored_when_switched_off():
+    c = _robots_crawler(_ROBOTS, honor_crawl_delay=False)
+    assert c.limiter.interval == 0.1
+
+
+def test_disallow_rules_still_apply_with_crawl_delay_off():
+    c = _robots_crawler(_ROBOTS, honor_crawl_delay=False)
+    assert not c._can_fetch(f"{BASE}/private/page")
+    assert c._can_fetch(f"{BASE}/public")

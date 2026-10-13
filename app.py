@@ -196,7 +196,15 @@ with st.sidebar:
             help="Minimum gap between request starts, shared across all workers, and "
                  "the usual speed ceiling: at 0.10s no worker count exceeds 10 pages/sec. "
                  "Drop it to 0.02–0.05 on servers you know tolerate it. robots.txt "
-                 "Crawl-delay overrides this when it asks for more.",
+                 "Crawl-delay overrides this when it asks for more, unless that's "
+                 "switched off below.",
+        )
+        honor_crawl_delay_input = st.checkbox(
+            "Honor robots.txt Crawl-delay", value=True,
+            help="Many Drupal sites ask for 10s between requests, which we cap at 1s — "
+                 "that holds a crawl to 1 page/sec. Untick for sites you run (Screaming "
+                 "Frog ignores Crawl-delay too). Disallow rules still apply, and the "
+                 "crawler still backs off if the site returns 429 or 503.",
         )
         resume_file = st.file_uploader(
             "Resume from previous crawl (optional)",
@@ -310,6 +318,7 @@ if start_button:
                 include_paths=include_paths,
                 max_depth=int(max_depth_input) if max_depth_input > 0 else None,
                 max_workers=int(max_workers_input),
+                honor_crawl_delay=honor_crawl_delay_input,
                 cached_pages=cached_pages or None,
                 auth=site_creds,
             )
