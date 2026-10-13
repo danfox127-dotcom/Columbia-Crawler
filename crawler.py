@@ -179,6 +179,16 @@ class Crawler:
             {self._dedupe_key(u) for u in seed_visited} if seed_visited is not None else set()
         )
         self.queue: "deque[str]" = deque([self.start_url])
+        # Start inside each include folder too: the start page may not link to
+        # it directly, and a misspelled folder then shows up as its own 404 row.
+        for inc in self.include_paths:
+            folder = inc.strip().strip("/")
+            if folder:
+                seed = f"{parsed.scheme}://{parsed.netloc}/{folder}"
+                if self._is_crawlable(seed):
+                    self.queue.append(seed)
+        # Include paths with no page that loaded; warned about once the crawl ends.
+        self._unconfirmed_includes = [p for p in self.include_paths if p.strip().strip("/")]
 
         # Guards visited / queue / the counters below, all of which are touched
         # by the driver thread while workers are in flight.
@@ -386,12 +396,27 @@ class Crawler:
                 for future in done:
                     url = in_flight.pop(future)
                     page = future.result()
+                    self._confirm_includes(page)
                     self._enqueue_links(page)
                     with self.lock:
                         self.completed += 1
                         done_count = self.completed
                         remaining = len(self.queue) + len(in_flight)
                     yield page, done_count, remaining
+
+        for inc in self._unconfirmed_includes:
+            self.warnings.append(
+                f"No pages under include path {inc} loaded successfully. "
+                "Check the folder name is spelled as it appears in the site's URLs."
+            )
+
+    def _confirm_includes(self, page: PageData) -> None:
+        if not self._unconfirmed_includes or not 200 <= page.status_code < 400:
+            return
+        path = urlparse(page.url).path.lower()
+        self._unconfirmed_includes = [
+            inc for inc in self._unconfirmed_includes if not self._path_matches(inc, path)
+        ]
 
     def _claim_next(self) -> Optional[str]:
         """Pop the next crawlable URL and mark it taken, or None if exhausted.

@@ -290,7 +290,9 @@ with st.sidebar:
             "Include paths — scan ONLY these (one per line)",
             key="include_paths_raw",
             placeholder="/faculty/\n/research/\n/departments/",
-            help="Only crawl URLs whose path contains one of these. Leave blank to crawl everything.",
+            help="Only crawl pages in these folders (and the start URL). The crawl also starts "
+                 "inside each folder, so it must match the site's URLs exactly. "
+                 "Leave blank to crawl everything.",
             height=100,
         )
     else:
