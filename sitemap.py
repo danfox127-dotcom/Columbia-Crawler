@@ -28,6 +28,7 @@ def fetch_sitemap_urls(
     excluded_paths: Optional[List[str]] = None,
     included_paths: Optional[List[str]] = None,
     get: Callable = requests.get,
+    auth: Optional[requests.auth.AuthBase] = None,
 ) -> SitemapResult:
     """Recursively collect <loc> URLs from a sitemap or sitemap index.
 
@@ -44,7 +45,7 @@ def fetch_sitemap_urls(
             return
         seen_sitemaps.add(url)
         try:
-            resp = get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            resp = get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"}, auth=auth)
         except requests.RequestException as exc:
             result.warnings.append(f"Could not fetch sitemap {url} ({type(exc).__name__}).")
             return

@@ -150,3 +150,16 @@ def test_check_url_parses_normal_page():
     row = check_url("https://example.com/x", _Session(_Resp(200, html, {"content-type": "text/html"})))
 
     assert (row["status"], row["title"], row["h1"], row["error"]) == (200, "T", "H", None)
+
+
+def test_sitemap_requests_carry_site_auth():
+    seen = []
+
+    def get(url, **kwargs):
+        seen.append(kwargs.get("auth"))
+        return _Resp(body=_urlset("/a"))
+
+    marker = object()
+    fetch_sitemap_urls(SITEMAP, 100, get=get, auth=marker)
+
+    assert seen == [marker]

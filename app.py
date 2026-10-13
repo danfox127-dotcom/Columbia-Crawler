@@ -5,7 +5,7 @@ import json
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
-from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler
+from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler, make_site_auth, resolve_site_creds
 from sitemap import check_url, fetch_sitemap_urls
 from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
@@ -13,15 +13,17 @@ from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_exp
 st.set_page_config(page_title="Healthcare SEO Crawler", page_icon="🕷️", layout="wide")
 
 # --- 5. SITEMAP SCANNER ---
-def scan_sitemap(sitemap_url, max_urls, excluded_paths, included_paths, progress_bar):
+def scan_sitemap(sitemap_url, max_urls, excluded_paths, included_paths, progress_bar, auth=None):
     """Returns (DataFrame, url_count, warnings, blocked_count)."""
-    found = fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths, included_paths)
+    site_auth = make_site_auth(sitemap_url, auth)
+    found = fetch_sitemap_urls(sitemap_url, max_urls, excluded_paths, included_paths, auth=site_auth)
     urls = found.urls
     if not urls:
         return pd.DataFrame(), 0, found.warnings, 0
 
     session = requests.Session()
     session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+    session.auth = site_auth
     results = [None] * len(urls)
     completed = 0
 
@@ -251,6 +253,17 @@ with st.sidebar:
             height=100,
         )
 
+    with st.expander("🔒 Site login (password-protected pages)"):
+        # Never pre-fill these from secrets: a password box only masks the
+        # text, and on a public Space anyone could reveal it.
+        auth_user_input = st.text_input("Username", key="site_auth_user")
+        auth_pass_input = st.text_input("Password", type="password", key="site_auth_password")
+        saved_host = os.environ.get("SITE_AUTH_HOST", "").strip()
+        if saved_host and os.environ.get("SITE_AUTH_USER") and os.environ.get("SITE_AUTH_PASSWORD"):
+            st.caption(f"Leave blank to use the login saved for {saved_host}.")
+        st.caption("For HTTP Basic logins (browser pop-up). Sent only to the site "
+                   "being audited, over HTTPS.")
+
     start_button = st.button("🚀 Start", use_container_width=True)
     st.divider()
     st.header("🤖 Gemini Settings")
@@ -267,6 +280,8 @@ if start_button:
     else:
         excluded_paths = [p.strip() for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
         include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
+        site_creds = resolve_site_creds(target_url, auth_user_input, auth_pass_input, os.environ)
+        has_login = site_creds is not None
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None
@@ -293,6 +308,7 @@ if start_button:
                 max_depth=int(max_depth_input) if max_depth_input > 0 else None,
                 max_workers=int(max_workers_input),
                 cached_pages=cached_pages or None,
+                auth=site_creds,
             )
 
             progress_bar = st.progress(0, text="Starting crawl…")
@@ -362,7 +378,8 @@ if start_button:
                     int(max_pages_input) if max_pages_input > 0 else 999999,
                     excluded_paths,
                     include_paths,
-                    progress_bar
+                    progress_bar,
+                    auth=site_creds,
                 )
                 progress_bar.empty()
                 for warning in sitemap_warnings:
@@ -392,10 +409,16 @@ if start_button:
             st.session_state.issues_df = detect_seo_issues(st.session_state.df)
             protected = int((st.session_state.df["status"] == 401).sum())
             if protected:
-                st.warning(
-                    f"{protected} page(s) returned 401: they're password-protected, so "
-                    "their content couldn't be audited."
-                )
+                if has_login:
+                    st.warning(
+                        f"{protected} page(s) returned 401 even with the site login. "
+                        "Check the username and password under 🔒 Site login."
+                    )
+                else:
+                    st.warning(
+                        f"{protected} page(s) returned 401: they're password-protected. "
+                        "Add the login under 🔒 Site login to audit them."
+                    )
 
 # --- 10. DISPLAY RESULTS ---
 # Display-only: makes the url column clickable. Exports are unaffected.
