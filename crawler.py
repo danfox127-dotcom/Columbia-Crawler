@@ -19,6 +19,15 @@ from requests.adapters import HTTPAdapter  # type: ignore
 from urllib3.util.retry import Retry  # type: ignore
 
 
+CHALLENGE_ERROR = "Blocked by Cloudflare bot challenge"
+
+
+def _is_bot_challenge(resp) -> bool:
+    """Cloudflare tags its JS/captcha interstitials with this header. No plain
+    HTTP client can pass one, whatever User-Agent it sends."""
+    return (resp.headers.get("cf-mitigated") or "").strip().lower() == "challenge"
+
+
 @dataclass
 class ImageInfo:
     src: str
@@ -177,6 +186,9 @@ class Crawler:
         self.claimed = 0      # URLs handed to a worker; caps at max_pages
         self.completed = 0    # pages yielded to the caller
 
+        # Crawl-level problems the UI should show (e.g. robots.txt refused).
+        self.warnings: List[str] = []
+
         self.session = requests.Session()
         self.session.headers.update(self._HEADERS)
         
@@ -205,12 +217,44 @@ class Crawler:
         parsed = urlparse(start_url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         rp = RobotFileParser(robots_url)
+        # Fetched through our session rather than rp.read(), which sends urllib's
+        # default User-Agent and doesn't share our redirect/retry handling. A WAF
+        # that 403s that UA makes the stdlib treat the whole site as disallowed.
         try:
-            rp.read()
-            self.robots = rp
-            self._apply_robots_delay(rp)
-        except Exception:
-            pass
+            resp = self.session.get(robots_url, timeout=self.timeout)
+        except requests.RequestException as exc:
+            self.warnings.append(
+                f"Could not fetch robots.txt ({type(exc).__name__}); crawling without it."
+            )
+            return
+
+        status = resp.status_code
+        if _is_bot_challenge(resp):
+            # A bot wall isn't the site's crawl policy; the page fetches will
+            # report the block themselves.
+            self.warnings.append(
+                "robots.txt is behind a Cloudflare bot challenge; crawling without it."
+            )
+            return
+        if status in (401, 403):
+            # Same rule as RobotFileParser.read(): access denied = disallow all.
+            rp.disallow_all = True
+            self.warnings.append(
+                f"robots.txt returned {status}, which robots rules treat as "
+                "'disallow everything' — no pages will be crawled."
+            )
+        elif 400 <= status < 500:
+            rp.allow_all = True
+        elif status >= 500:
+            self.warnings.append(
+                f"robots.txt returned {status}; crawling without it."
+            )
+            return
+        else:
+            rp.parse(resp.text.splitlines())
+
+        self.robots = rp
+        self._apply_robots_delay(rp)
 
     def _apply_robots_delay(self, robots) -> None:
         """Raise the minimum interval toward robots.txt Crawl-delay, bounded by
@@ -446,6 +490,11 @@ class Crawler:
                     page.redirect_chain = [r.url for r in resp.history] + [resp.url]
                     if self._normalize(url) == self._normalize(self.start_url):
                         self._adopt_redirect_host(resp.url)
+
+                if _is_bot_challenge(resp):
+                    # The interstitial's HTML and links aren't the site's content.
+                    page.error = CHALLENGE_ERROR
+                    return page
 
                 if resp.status_code == 304:
                     # Unchanged: reuse the stored record wholesale, keeping its
