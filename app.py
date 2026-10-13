@@ -5,7 +5,7 @@ import json
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urljoin
-from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler, make_site_auth
+from crawler import CHALLENGE_ERROR, Crawler as BFSCrawler, make_site_auth, resolve_site_creds
 from sitemap import check_url, fetch_sitemap_urls
 from schemas.linkup_export_v1 import build_header, build_export_jsonl, parse_export_jsonl
 
@@ -258,8 +258,9 @@ with st.sidebar:
         # text, and on a public Space anyone could reveal it.
         auth_user_input = st.text_input("Username", key="site_auth_user")
         auth_pass_input = st.text_input("Password", type="password", key="site_auth_password")
-        if os.environ.get("SITE_AUTH_USER") and os.environ.get("SITE_AUTH_PASSWORD"):
-            st.caption("Leave blank to use the login saved in Space secrets.")
+        saved_host = os.environ.get("SITE_AUTH_HOST", "").strip()
+        if saved_host and os.environ.get("SITE_AUTH_USER") and os.environ.get("SITE_AUTH_PASSWORD"):
+            st.caption(f"Leave blank to use the login saved for {saved_host}.")
         st.caption("For HTTP Basic logins (browser pop-up). Sent only to the site "
                    "being audited, over HTTPS.")
 
@@ -279,11 +280,8 @@ if start_button:
     else:
         excluded_paths = [p.strip() for p in st.session_state.get("exclude_paths_raw", "").splitlines() if p.strip()]
         include_paths = [p.strip() for p in st.session_state.get("include_paths_raw", "").splitlines() if p.strip()]
-        site_creds = (
-            auth_user_input.strip() or os.environ.get("SITE_AUTH_USER", ""),
-            auth_pass_input or os.environ.get("SITE_AUTH_PASSWORD", ""),
-        )
-        has_login = all(site_creds)
+        site_creds = resolve_site_creds(target_url, auth_user_input, auth_pass_input, os.environ)
+        has_login = site_creds is not None
         st.session_state.df = None
         st.session_state.issues_df = None
         st.session_state.gemini_response = None

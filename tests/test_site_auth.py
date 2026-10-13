@@ -4,7 +4,7 @@ import base64
 
 import requests
 
-from crawler import Crawler, SiteBasicAuth
+from crawler import Crawler, SiteBasicAuth, resolve_site_creds
 
 CREDS = ("editor", "s3cret")
 EXPECTED = "Basic " + base64.b64encode(b"editor:s3cret").decode()
@@ -50,3 +50,42 @@ def test_crawler_without_credentials_sends_no_auth():
 def test_blank_credentials_are_ignored():
     c = Crawler("https://example.com", respect_robots=False, auth=("", ""))
     assert c.session.auth is None
+
+
+# ── which login a run uses ──────────────────────────────────────────────────
+
+SAVED = {
+    "SITE_AUTH_USER": "saved-user",
+    "SITE_AUTH_PASSWORD": "saved-pass",
+    "SITE_AUTH_HOST": "www.columbiadoctors.org",
+}
+
+
+def test_saved_login_used_for_its_own_site():
+    got = resolve_site_creds("https://columbiadoctors.org/sitemap.xml", "", "", SAVED)
+    assert got == ("saved-user", "saved-pass")
+
+
+def test_saved_login_never_sent_to_a_visitor_chosen_site():
+    assert resolve_site_creds("https://attacker.example/", "", "", SAVED) is None
+    assert resolve_site_creds("https://columbiadoctors.org.attacker.example/", "", "", SAVED) is None
+
+
+def test_saved_login_unused_without_a_saved_host():
+    env = {k: v for k, v in SAVED.items() if k != "SITE_AUTH_HOST"}
+    assert resolve_site_creds("https://www.columbiadoctors.org/", "", "", env) is None
+
+
+def test_saved_host_may_be_given_as_a_url():
+    env = dict(SAVED, SITE_AUTH_HOST="https://www.columbiadoctors.org/")
+    assert resolve_site_creds("https://www.columbiadoctors.org/x", "", "", env) is not None
+
+
+def test_typed_login_goes_to_whatever_site_the_user_chose():
+    got = resolve_site_creds("https://other.example/", "me", "pw", SAVED)
+    assert got == ("me", "pw")
+
+
+def test_half_typed_login_never_borrows_the_saved_password():
+    assert resolve_site_creds("https://attacker.example/", "me", "", SAVED) is None
+    assert resolve_site_creds("https://www.columbiadoctors.org/", "me", "", SAVED) is None

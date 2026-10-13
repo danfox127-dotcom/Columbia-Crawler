@@ -50,6 +50,33 @@ def make_site_auth(site_url: str, auth: Optional[Tuple[str, str]]) -> Optional[S
     return SiteBasicAuth(site_url, auth[0], auth[1])
 
 
+def resolve_site_creds(
+    target_url: str, typed_user: str, typed_password: str, env
+) -> Optional[Tuple[str, str]]:
+    """The login to use for one run, or None.
+
+    Typed credentials go to whichever site the user targets. Saved ones
+    (SITE_AUTH_USER / SITE_AUTH_PASSWORD) go only to SITE_AUTH_HOST: on a
+    public Space any visitor picks the target URL, and could otherwise point
+    the crawler at their own server to collect the saved password.
+    """
+    typed_user = (typed_user or "").strip()
+    if typed_user or typed_password:
+        return (typed_user, typed_password) if typed_user and typed_password else None
+
+    user = env.get("SITE_AUTH_USER", "")
+    password = env.get("SITE_AUTH_PASSWORD", "")
+    host = env.get("SITE_AUTH_HOST", "").strip()
+    if not (user and password and host):
+        return None
+    if "://" in host:
+        host = urlparse(host).netloc
+    host = host.strip("/")
+    if Crawler._host_key(urlparse(target_url).netloc) != Crawler._host_key(host):
+        return None
+    return (user, password)
+
+
 @dataclass
 class ImageInfo:
     src: str
