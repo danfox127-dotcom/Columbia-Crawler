@@ -178,3 +178,13 @@ def test_auditor_does_not_flag_css_backgrounds_for_missing_alt():
     page.images = [ImageInfo(src="https://example.com/photo.jpg", alt=None)]
     kinds = {i.issue_type if hasattr(i, "issue_type") else getattr(i, "kind", None) for i in auditor.audit([page])}
     assert "missing_alt" in kinds
+
+
+def test_extract_images_off_skips_images_and_marks_record():
+    page = PageData(url=BASE)
+    c = Crawler("https://example.com", respect_robots=False, extract_images=False)
+    c._parse(page, '<html><body><img src="/a.jpg" alt="A"></body></html>', BASE)
+    assert page.images == [] and page.to_dict()["images_extracted"] is False
+    on = PageData(url=BASE)
+    Crawler("https://example.com", respect_robots=False)._parse(on, '<html><body><img src="/a.jpg"></body></html>', BASE)
+    assert "images_extracted" not in on.to_dict()

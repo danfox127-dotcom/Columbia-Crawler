@@ -54,6 +54,7 @@ JSONL (JSON Lines): one JSON object per line. Line 1 is always a header object. 
 | `last_modified` | string | no | `Last-Modified` response header, used to revalidate on the next crawl |
 | `from_cache` | boolean | no | True if the server answered 304 and this record was reused from the previous export |
 | `parser` | integer | no | Version of the HTML extraction that produced this record (absent = 1). Records from an older parser are refetched in full instead of revalidated. |
+| `images_extracted` | boolean | no | `false` when the crawl ran with image extraction off (then `images` is empty). Absent = images were extracted. A later crawl that wants images refetches such records in full. |
 
 ### Image object
 

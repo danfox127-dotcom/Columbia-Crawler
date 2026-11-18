@@ -64,3 +64,39 @@ def test_seed_still_respects_exclude_paths():
     c = _crawler(site, include_paths=["/team/"], exclude_paths=["/team/"])
 
     assert [p.url for p, _, _ in c.crawl()] == [BASE]
+
+
+def test_children_only_exclude_skips_subpages_but_keeps_landing_page():
+    """'/library/*' skips the library's articles but still visits /library itself."""
+    site = FakeSite({
+        BASE: page(links=["/library", "/about"]),
+        f"{BASE}/library": page(links=["/library/a", "/library/b"]),
+        f"{BASE}/library/a": page(),
+        f"{BASE}/library/b": page(),
+        f"{BASE}/about": page(),
+    })
+    c = _crawler(site, exclude_paths=["/library/*"])
+    assert sorted(p.url for p, _, _ in c.crawl()) == [BASE, f"{BASE}/about", f"{BASE}/library"]
+
+
+def test_children_only_suffix_on_an_include_means_the_whole_folder():
+    """An include needs the folder page to discover its subpages, so 'team/*' == 'team'."""
+    site = FakeSite({
+        BASE: page(),
+        f"{BASE}/team": page(links=["/team/alice"]),
+        f"{BASE}/team/alice": page(),
+    })
+    c = _crawler(site, include_paths=["team/*"])
+    urls = sorted(p.url for p, _, _ in c.crawl())
+    assert urls == [BASE, f"{BASE}/team", f"{BASE}/team/alice"]
+    assert c.warnings == []
+
+
+def test_path_patterns():
+    m = Crawler._path_matches
+    assert m("/library/*", "/library/article/x") and m("library/*", "/library/a")
+    assert not m("/library/*", "/library") and not m("/library/*", "/library/")
+    assert not m("/library/*", "/library-news/x")
+    assert m("/library", "/library") and m("/library", "/library/a")
+    assert not m("/*", "/anything") and not m("", "/x")
+    assert m("/Library/*", "/library/A")

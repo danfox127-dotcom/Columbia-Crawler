@@ -200,3 +200,17 @@ def test_strong_etag_is_sent_alongside_last_modified():
     [pg for pg, _, _ in c.crawl()]
     sent = site.headers_for(BASE)[0]
     assert sent.get("If-None-Match") == '"strong"' and sent.get("If-Modified-Since") == stamp
+
+
+def test_record_without_images_is_refetched_when_images_are_wanted():
+    site = FakeSite({BASE: page(etag='"v1"')})
+    rec = _cached(BASE, etag='"v1"')
+    rec["images_extracted"] = False
+    c = _crawler(site, cached_pages={BASE: rec})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    assert "If-None-Match" not in site.headers_for(BASE)[0] and p.from_cache is False
+
+    site = FakeSite({BASE: page(etag='"v1"')})
+    c = _crawler(site, cached_pages={BASE: rec}, extract_images=False)
+    p = [pg for pg, _, _ in c.crawl()][0]
+    assert p.from_cache is True and p.images_extracted is False

@@ -135,6 +135,7 @@ class PageData:
     etag: str = ""
     last_modified: str = ""
     from_cache: bool = False
+    images_extracted: bool = True  # False when the crawl ran with extract_images off
 
     def to_dict(self) -> dict:
         return {
@@ -159,6 +160,7 @@ class PageData:
             "last_modified": self.last_modified,
             "from_cache": self.from_cache,
             "parser": PARSER_VERSION,
+            **({} if self.images_extracted else {"images_extracted": False}),
         }
 
 
@@ -239,18 +241,24 @@ class Crawler:
         cached_pages: Optional[dict] = None,
         auth: Optional[Tuple[str, str]] = None,
         honor_crawl_delay: bool = True,
+        extract_images: bool = True,
     ):
         self.start_url = start_url.rstrip("/")
         self.max_pages = max_pages
         self.delay = delay
         self.timeout = timeout
         self.exclude_paths = exclude_paths or []
-        self.include_paths = include_paths or []
+        # "/*" (subpages only) is for excludes; an include needs the folder page
+        # itself to discover what's under it, so "team/*" means "team" here.
+        self.include_paths = [p.strip().removesuffix("/*") for p in (include_paths or [])]
         self.max_depth = max_depth
         self.max_workers = max(1, int(max_workers))
         # Off = obey robots.txt Disallow rules but not its Crawl-delay, as
         # Screaming Frog does. Drupal's stock robots.txt asks for 10s.
         self.honor_crawl_delay = honor_crawl_delay
+        # Off skips image extraction (pages report no images), for audits that
+        # don't need alt-text checks.
+        self.extract_images = extract_images
         self.limiter = _RateLimiter(delay)
         # url -> previously exported page dict, used to revalidate instead of
         # refetching. Keys are normalized so a stored "/a/" matches a crawled "/a".
@@ -268,13 +276,13 @@ class Crawler:
         # Start inside each include folder too: the start page may not link to
         # it directly, and a misspelled folder then shows up as its own 404 row.
         for inc in self.include_paths:
-            folder = inc.strip().strip("/")
+            folder = inc.strip().removesuffix("/*").strip("/")
             if folder:
                 seed = f"{parsed.scheme}://{parsed.netloc}/{folder}"
                 if self._is_crawlable(seed):
                     self.queue.append(seed)
         # Include paths with no page that loaded; warned about once the crawl ends.
-        self._unconfirmed_includes = [p for p in self.include_paths if p.strip().strip("/")]
+        self._unconfirmed_includes = [p for p in self.include_paths if p.strip().removesuffix("/*").strip("/")]
 
         # Guards visited / queue / the counters below, all of which are touched
         # by the driver thread while workers are in flight.
@@ -427,15 +435,23 @@ class Crawler:
 
         Matches by path segment, not raw substring, and is agnostic to trailing
         slashes on either side (e.g. pattern "/blog/" matches "/blog" and
-        "/blog/post-1", but not "/blogging-tips").
+        "/blog/post-1", but not "/blogging-tips"). A trailing "/*" matches only
+        what's under the folder, not the folder page itself: "/blog/*" matches
+        "/blog/post-1" but not "/blog" (e.g. to skip a library's articles but
+        keep its landing page).
         """
         pattern = pattern.strip().lower()
-        if not pattern:
+        children_only = pattern.endswith("/*")
+        if children_only:
+            pattern = pattern[:-2]
+        if not pattern.strip("/"):
             return False
         if not pattern.startswith("/"):
             pattern = "/" + pattern
         pattern = pattern.rstrip("/")
-        path = path.rstrip("/")
+        path = path.rstrip("/").lower()
+        if children_only:
+            return path.startswith(pattern + "/")
         return path == pattern or path.startswith(pattern + "/")
 
     @staticmethod
@@ -566,6 +582,7 @@ class Crawler:
             etag=cached.get("etag") or "",
             last_modified=cached.get("last_modified") or "",
             from_cache=True,
+            images_extracted=cached.get("images_extracted", True) is not False,
         )
 
     def _fetch(self, url: str, conditional: bool = True) -> PageData:
@@ -573,6 +590,8 @@ class Crawler:
         cached = self.cached_pages.get(self._normalize(url)) if conditional else None
         if cached and int(cached.get("parser") or 1) < PARSER_VERSION:
             cached = None  # extracted by an older parser: fetch and re-parse in full
+        if cached and self.extract_images and cached.get("images_extracted") is False:
+            cached = None  # stored without images, but this crawl wants them
         headers = {}
         if cached:
             etag, last_modified = cached.get("etag"), cached.get("last_modified")
@@ -694,7 +713,10 @@ class Crawler:
             page.canonical = (c_href[0] if isinstance(c_href, list) else c_href).strip()
 
         # Images — extracted before boilerplate stripping below
-        page.images = extract_images(soup, base_url)
+        if self.extract_images:
+            page.images = extract_images(soup, base_url)
+        else:
+            page.images_extracted = False
 
         # Links — extracted before boilerplate stripping below, since nav/header/
         # footer menus (which get decompose()'d for the word count) are often the
