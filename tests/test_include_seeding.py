@@ -100,3 +100,23 @@ def test_path_patterns():
     assert m("/library", "/library") and m("/library", "/library/a")
     assert not m("/*", "/anything") and not m("", "/x")
     assert m("/Library/*", "/library/A")
+
+
+def test_add_seeds_reaches_orphan_pages():
+    site = FakeSite({
+        BASE: page(links=["/a"]),
+        f"{BASE}/a": page(),
+        f"{BASE}/orphan": page(links=["/orphan/child"]),
+        f"{BASE}/orphan/child": page(),
+        f"{BASE}/skipped/x": page(),
+    })
+    c = _crawler(site, exclude_paths=["/skipped"])
+    queued = c.add_seeds([f"{BASE}/orphan", f"{BASE}/a", "https://other.example/page",
+                          f"{BASE}/skipped/x", "mailto:x@example.com", ""])
+    assert queued == 2  # orphan + a (a is deduped when claimed)
+    urls = sorted(p.url for p, _, _ in c.crawl())
+    assert urls == [BASE, f"{BASE}/a", f"{BASE}/orphan", f"{BASE}/orphan/child"]
+
+
+def test_sitemap_urls_without_robots_is_empty():
+    assert _crawler(FakeSite({BASE: page()})).sitemap_urls() == []

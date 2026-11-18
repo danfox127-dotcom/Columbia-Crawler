@@ -316,6 +316,34 @@ class Crawler:
         if respect_robots:
             self._load_robots(start_url)
 
+    def add_seeds(self, urls) -> int:
+        """Queue extra start URLs (e.g. from a sitemap or a previous crawl).
+
+        Link-following alone never reaches orphan pages that nothing links to.
+        Only same-site URLs the crawl is allowed to visit are queued (include and
+        exclude paths, robots.txt, depth); duplicates are dropped when claimed.
+        Call before crawl(). Returns how many were queued.
+        """
+        added = 0
+        with self.lock:
+            for url in urls:
+                url = (url or "").strip()
+                if not url.startswith(("http://", "https://")) or not self._same_domain(url):
+                    continue
+                if self._is_crawlable(url) and self._can_fetch(url):
+                    self.queue.append(url)
+                    added += 1
+        return added
+
+    def sitemap_urls(self) -> List[str]:
+        """Sitemaps the site's robots.txt lists (empty if none or robots wasn't loaded)."""
+        if self.robots is None:
+            return []
+        try:
+            return list(self.robots.site_maps() or [])
+        except Exception:
+            return []
+
     # ── robots.txt ──────────────────────────────────────────────────────────
 
     def _load_robots(self, start_url: str) -> None:
