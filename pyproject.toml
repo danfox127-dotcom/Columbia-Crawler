@@ -1,0 +1,28 @@
+# Lets other projects install the crawl engine (`pip install columbia-crawler`
+# from git, or `pip install -e .` locally) without the Streamlit app, the AI
+# advisor or Scrapy. The HF Space still builds from requirements.txt.
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "columbia-crawler"
+version = "0.2.0"
+description = "Lightweight polite BFS site crawler (engine of the Columbia-Crawler / ContentCT app)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28",
+    "beautifulsoup4>=4.11",
+    "lxml>=4.9",
+    "urllib3>=1.26",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+py-modules = ["crawler", "sitemap"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

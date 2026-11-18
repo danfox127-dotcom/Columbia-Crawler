@@ -1,6 +1,6 @@
 """Re-crawls revalidate cached pages instead of skipping or refetching them."""
 
-from crawler import Crawler, PageData
+from crawler import PARSER_VERSION, Crawler, PageData
 from tests.fake_http import FakeSite, page
 
 BASE = "https://example.com"
@@ -27,6 +27,7 @@ def _cached(url, etag=None, last_modified=None, links=(), title="Cached Title"):
         "error": None,
         "etag": etag,
         "last_modified": last_modified,
+        "parser": PARSER_VERSION,
     }
 
 
@@ -128,7 +129,7 @@ def test_validators_without_a_usable_record_trigger_an_unconditional_refetch():
     """Caller supplied an ETag but no real stored page — revalidating would
     otherwise reuse a blank record and report status 0."""
     site = FakeSite({BASE: page(etag='"v1"')})
-    c = _crawler(site, cached_pages={BASE: {"etag": '"v1"'}})
+    c = _crawler(site, cached_pages={BASE: {"etag": '"v1"', "parser": PARSER_VERSION}})
     p = [pg for pg, _, _ in c.crawl()][0]
     sent = site.headers_for(BASE)
     assert len(sent) == 2
@@ -155,3 +156,19 @@ def test_cached_keys_match_regardless_of_trailing_slash():
     c = _crawler(site, cached_pages={f"{BASE}/": _cached(BASE, etag='"v1"')})
     p = [pg for pg, _, _ in c.crawl()][0]
     assert p.from_cache is True
+
+
+def test_record_from_an_older_parser_is_refetched_and_reparsed():
+    """Records exported before image extraction changed must not be revalidated:
+    a 304 would keep their stale image list."""
+    site = FakeSite({BASE: page(etag='"v1"')})
+    old = _cached(BASE, etag='"v1"')
+    del old["parser"]  # exported by parser version 1
+    c = _crawler(site, cached_pages={BASE: old})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    sent = site.headers_for(BASE)
+    assert len(sent) == 1
+    assert "If-None-Match" not in sent[0]
+    assert p.from_cache is False
+    assert p.title == "t"
+    assert p.to_dict()["parser"] == PARSER_VERSION

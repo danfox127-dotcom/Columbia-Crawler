@@ -21,6 +21,11 @@ from urllib3.util.retry import Retry  # type: ignore
 
 CHALLENGE_ERROR = "Blocked by Cloudflare bot challenge"
 
+# Bumped whenever _parse extracts different data from the same HTML. Cached
+# page records from an older parser are refetched in full instead of being
+# revalidated (a 304 would otherwise keep their stale extraction).
+PARSER_VERSION = 2
+
 
 def _is_bot_challenge(resp) -> bool:
     """Cloudflare tags its JS/captcha interstitials with this header. No plain
@@ -81,6 +86,32 @@ def resolve_site_creds(
 class ImageInfo:
     src: str
     alt: Optional[str]  # None = attribute absent; '' = explicitly empty
+    # Every URL this element can load (srcset / <picture> sources), incl. src.
+    candidates: List[str] = field(default_factory=list)
+    kind: str = "img"  # "img" | "picture" | "background"
+    # Innermost landmark containing the image: header, nav, footer, main,
+    # aside, or "" when it isn't inside one.
+    location: str = ""
+
+    def to_dict(self) -> dict:
+        d = {"src": self.src, "alt": self.alt}
+        if self.candidates:
+            d["candidates"] = list(self.candidates)
+        if self.kind != "img":
+            d["kind"] = self.kind
+        if self.location:
+            d["location"] = self.location
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ImageInfo":
+        return cls(
+            src=d.get("src", ""),
+            alt=d.get("alt"),
+            candidates=list(d.get("candidates") or []),
+            kind=d.get("kind") or "img",
+            location=d.get("location") or "",
+        )
 
 
 @dataclass
@@ -121,12 +152,13 @@ class PageData:
             "external_links": list(self.external_links),
             "is_redirect": self.is_redirect,
             "redirect_chain": list(self.redirect_chain),
-            "images": [{"src": img.src, "alt": img.alt} for img in self.images],
+            "images": [img.to_dict() for img in self.images],
             "load_time": round(self.load_time, 3),
             "error": self.error,
             "etag": self.etag,
             "last_modified": self.last_modified,
             "from_cache": self.from_cache,
+            "parser": PARSER_VERSION,
         }
 
 
@@ -524,10 +556,7 @@ class Crawler:
             canonical=cached.get("canonical") or "",
             word_count=int(cached.get("word_count") or 0),
             load_time=load_time,
-            images=[
-                ImageInfo(src=img.get("src", ""), alt=img.get("alt"))
-                for img in (cached.get("images") or [])
-            ],
+            images=[ImageInfo.from_dict(img) for img in (cached.get("images") or [])],
             internal_links=list(cached.get("internal_links") or []),
             external_links=list(cached.get("external_links") or []),
             is_redirect=bool(cached.get("is_redirect")),
@@ -542,6 +571,8 @@ class Crawler:
     def _fetch(self, url: str, conditional: bool = True) -> PageData:
         page = PageData(url=url)
         cached = self.cached_pages.get(self._normalize(url)) if conditional else None
+        if cached and int(cached.get("parser") or 1) < PARSER_VERSION:
+            cached = None  # extracted by an older parser: fetch and re-parse in full
         headers = {}
         if cached:
             if cached.get("etag"):
@@ -658,15 +689,7 @@ class Crawler:
             page.canonical = (c_href[0] if isinstance(c_href, list) else c_href).strip()
 
         # Images — extracted before boilerplate stripping below
-        for img in soup.find_all("img"):
-            src_val = img.get("src", "")
-            src = (src_val[0] if isinstance(src_val, list) else src_val).strip()
-            if not src or src.startswith("data:"):
-                continue
-            abs_src = urljoin(base_url, src)
-            alt_val = img.get("alt", None)
-            alt = alt_val[0] if isinstance(alt_val, list) else alt_val # type: ignore
-            page.images.append(ImageInfo(src=abs_src, alt=alt))
+        page.images = extract_images(soup, base_url)
 
         # Links — extracted before boilerplate stripping below, since nav/header/
         # footer menus (which get decompose()'d for the word count) are often the
@@ -694,3 +717,139 @@ class Crawler:
             words = text.split()
             page.word_count = len(words)
             page.content_snippet = " ".join(words[:120])  # ~600 chars for AI prompts
+
+
+# ── Image extraction ─────────────────────────────────────────────────────────
+
+_LANDMARK_TAGS = {"header": "header", "nav": "nav", "footer": "footer", "main": "main", "aside": "aside"}
+_LANDMARK_ROLES = {"banner": "header", "navigation": "nav", "contentinfo": "footer",
+                   "main": "main", "complementary": "aside"}
+_CSS_URL_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.I)
+_BG_STYLE_RE = re.compile(r"background(?:-image)?\s*:", re.I)
+# srcset items are separated by a comma followed by whitespace (URLs may contain
+# commas, but not ", ").
+_SRCSET_SPLIT_RE = re.compile(r",\s+")
+
+
+def _attr_str(tag, name: str) -> str:
+    val = tag.get(name)
+    if isinstance(val, list):
+        val = " ".join(val)
+    return (val or "").strip()
+
+
+def _parse_srcset(value: str) -> List[Tuple[str, float, str]]:
+    """'a.jpg 400w, b.jpg 800w' -> [('a.jpg', 400, 'w'), ('b.jpg', 800, 'w')]."""
+    out = []
+    for item in _SRCSET_SPLIT_RE.split(value.strip().rstrip(",")):
+        parts = item.strip().split()
+        if not parts:
+            continue
+        url, size, unit = parts[0].rstrip(","), 0.0, ""
+        if len(parts) > 1:
+            m = re.fullmatch(r"([\d.]+)([wx])", parts[1].lower())
+            if m:
+                size, unit = float(m.group(1)), m.group(2)
+        out.append((url, size, unit))
+    return out
+
+
+def _usable(url: str) -> bool:
+    return bool(url) and not url.startswith(("data:", "javascript:", "about:", "#"))
+
+
+_PLACEHOLDER_NAME_RE = re.compile(r"(^|[-_.])(empty|blank|spacer|placeholder|transparent|pixel|lazy)([-_.]|$)", re.I)
+
+
+def _is_placeholder(url: str) -> bool:
+    name = urlparse(url).path.rsplit("/", 1)[-1].lower()
+    return name.endswith(".gif") or bool(_PLACEHOLDER_NAME_RE.search(name.rsplit(".", 1)[0]))
+
+
+def _location(tag) -> str:
+    for parent in tag.parents:
+        name = getattr(parent, "name", None)
+        if name is None:
+            break
+        role = _attr_str(parent, "role").lower()
+        if role in _LANDMARK_ROLES:
+            return _LANDMARK_ROLES[role]
+        if name in _LANDMARK_TAGS:
+            return _LANDMARK_TAGS[name]
+    return ""
+
+
+def extract_images(soup, base_url: str) -> List[ImageInfo]:
+    """One ImageInfo per image element, including lazy-loaded ones.
+
+    Handles <img> src / data-src / srcset / data-srcset, <picture><source>,
+    and inline CSS background images. Placeholder srcs (data: URIs, or the
+    src of an element that also has a srcset) don't count. `src` is the
+    largest real candidate; the rest go in `candidates`. The same image seen
+    twice on a page (e.g. a lazy <img> plus its <noscript> fallback) is kept
+    once.
+    """
+    images: List[ImageInfo] = []
+    kept_best: set = set()  # chosen URL of each kept image
+    kept_any: set = set()   # every candidate URL of each kept image
+
+    def add(best: str, cands: List[str], alt, kind: str, tag) -> None:
+        urls = [u for u in dict.fromkeys([best] + cands) if u]
+        # Duplicate = this element's chosen URL is a variant of a kept image,
+        # or a kept image's chosen URL is one of this element's variants.
+        if best in kept_any or any(u in kept_best for u in urls):
+            return
+        kept_best.add(best)
+        kept_any.update(urls)
+        images.append(ImageInfo(src=best, alt=alt, candidates=urls if len(urls) > 1 else [],
+                                kind=kind, location=_location(tag)))
+
+    for img in soup.find_all("img"):
+        picture = img.find_parent("picture")
+        def srcset_of(tag) -> List[Tuple[str, float, str]]:
+            found = []
+            for attr in ("data-srcset", "srcset"):
+                found += _parse_srcset(_attr_str(tag, attr))
+            return [(urljoin(base_url, u), size, unit) for u, size, unit in found if _usable(u)]
+
+        own = srcset_of(img)
+        sources = [c for src in (picture.find_all("source") if picture else []) for c in srcset_of(src)]
+        sized = own + sources
+        singles = [urljoin(base_url, u) for u in
+                   (_attr_str(img, "data-src"), _attr_str(img, "data-original"), _attr_str(img, "src"))
+                   if _usable(u)]
+        if any(size for _, size, _ in sized):
+            # The plain src of a srcset image is usually a placeholder or a
+            # small fallback; prefer the largest described candidate.
+            best = max(sized, key=lambda c: (c[2] == "w", c[1]))[0]
+        elif own:
+            best = own[0][0]
+        elif singles:
+            # <source>s without size descriptors are art-direction variants
+            # (e.g. a mobile logo); the <img>'s own URL is the default.
+            best = singles[0]
+        elif sources:
+            best = sources[0][0]
+        else:
+            continue
+        alt_val = img.get("alt", None)
+        alt = alt_val[0] if isinstance(alt_val, list) else alt_val
+        if sized:
+            # Next to a srcset, a plain src is either a fallback rendition or a
+            # lazy-load placeholder (columbiadoctors.org: /assets/images/empty.gif).
+            singles = [u for u in singles if not _is_placeholder(u)]
+        cands = [u for u, _, _ in sized] + [u for u in singles if u != best]
+        add(best, cands, alt, "picture" if picture else "img", img)
+
+    for tag in soup.find_all(style=_BG_STYLE_RE):
+        for _, url in _CSS_URL_RE.findall(_attr_str(tag, "style")):
+            url = url.strip()
+            if _usable(url):
+                add(urljoin(base_url, url), [], None, "background", tag)
+    for tag in soup.find_all(attrs={"data-bg": True}):
+        url = _attr_str(tag, "data-bg")
+        m = _CSS_URL_RE.search(url)
+        url = m.group(2) if m else url
+        if _usable(url):
+            add(urljoin(base_url, url), [], None, "background", tag)
+    return images

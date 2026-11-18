@@ -257,6 +257,8 @@ def _audit_page(page, title_map, meta_map) -> List[Issue]:
     seen_srcs: set = set()
 
     for img in page.images:
+        if getattr(img, "kind", "img") == "background":
+            continue                      # CSS backgrounds can't carry alt text
         if _is_decorative(img.src):
             continue                      # skip chrome/icons/maps
         if img.src in seen_srcs:
