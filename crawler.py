@@ -575,10 +575,15 @@ class Crawler:
             cached = None  # extracted by an older parser: fetch and re-parse in full
         headers = {}
         if cached:
-            if cached.get("etag"):
-                headers["If-None-Match"] = cached["etag"]
-            if cached.get("last_modified"):
-                headers["If-Modified-Since"] = cached["last_modified"]
+            etag, last_modified = cached.get("etag"), cached.get("last_modified")
+            # If-None-Match wins over If-Modified-Since when both are sent, and some
+            # CDNs never match a weak ETag (W/"..."): columbiadoctors.org answers
+            # 200 to If-None-Match but 304 to If-Modified-Since. So a weak ETag is
+            # only used when there's no Last-Modified to fall back on.
+            if etag and not (etag.startswith("W/") and last_modified):
+                headers["If-None-Match"] = etag
+            if last_modified:
+                headers["If-Modified-Since"] = last_modified
 
         self.limiter.acquire()
         t0 = time.time()

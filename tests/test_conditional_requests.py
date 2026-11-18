@@ -172,3 +172,31 @@ def test_record_from_an_older_parser_is_refetched_and_reparsed():
     assert p.from_cache is False
     assert p.title == "t"
     assert p.to_dict()["parser"] == PARSER_VERSION
+
+
+def test_weak_etag_with_last_modified_sends_only_if_modified_since():
+    """Some CDNs never match weak ETags; If-None-Match would mask If-Modified-Since."""
+    stamp = "Wed, 18 Nov 2026 20:26:37 GMT"
+    site = FakeSite({BASE: page(etag='W/"1795033597-0"', last_modified=stamp)})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='W/"1795033597-0"', last_modified=stamp)})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    sent = site.headers_for(BASE)[0]
+    assert "If-None-Match" not in sent
+    assert sent["If-Modified-Since"] == stamp
+    assert p.from_cache is True
+
+
+def test_weak_etag_alone_is_still_sent():
+    site = FakeSite({BASE: page(etag='W/"v1"')})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='W/"v1"')})
+    [pg for pg, _, _ in c.crawl()]
+    assert site.headers_for(BASE)[0].get("If-None-Match") == 'W/"v1"'
+
+
+def test_strong_etag_is_sent_alongside_last_modified():
+    stamp = "Wed, 18 Nov 2026 20:26:37 GMT"
+    site = FakeSite({BASE: page(etag='"strong"', last_modified=stamp)})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='"strong"', last_modified=stamp)})
+    [pg for pg, _, _ in c.crawl()]
+    sent = site.headers_for(BASE)[0]
+    assert sent.get("If-None-Match") == '"strong"' and sent.get("If-Modified-Since") == stamp
