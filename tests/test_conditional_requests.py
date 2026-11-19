@@ -1,6 +1,6 @@
 """Re-crawls revalidate cached pages instead of skipping or refetching them."""
 
-from crawler import Crawler, PageData
+from crawler import PARSER_VERSION, Crawler, PageData
 from tests.fake_http import FakeSite, page
 
 BASE = "https://example.com"
@@ -27,6 +27,7 @@ def _cached(url, etag=None, last_modified=None, links=(), title="Cached Title"):
         "error": None,
         "etag": etag,
         "last_modified": last_modified,
+        "parser": PARSER_VERSION,
     }
 
 
@@ -128,7 +129,7 @@ def test_validators_without_a_usable_record_trigger_an_unconditional_refetch():
     """Caller supplied an ETag but no real stored page — revalidating would
     otherwise reuse a blank record and report status 0."""
     site = FakeSite({BASE: page(etag='"v1"')})
-    c = _crawler(site, cached_pages={BASE: {"etag": '"v1"'}})
+    c = _crawler(site, cached_pages={BASE: {"etag": '"v1"', "parser": PARSER_VERSION}})
     p = [pg for pg, _, _ in c.crawl()][0]
     sent = site.headers_for(BASE)
     assert len(sent) == 2
@@ -155,3 +156,61 @@ def test_cached_keys_match_regardless_of_trailing_slash():
     c = _crawler(site, cached_pages={f"{BASE}/": _cached(BASE, etag='"v1"')})
     p = [pg for pg, _, _ in c.crawl()][0]
     assert p.from_cache is True
+
+
+def test_record_from_an_older_parser_is_refetched_and_reparsed():
+    """Records exported before image extraction changed must not be revalidated:
+    a 304 would keep their stale image list."""
+    site = FakeSite({BASE: page(etag='"v1"')})
+    old = _cached(BASE, etag='"v1"')
+    del old["parser"]  # exported by parser version 1
+    c = _crawler(site, cached_pages={BASE: old})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    sent = site.headers_for(BASE)
+    assert len(sent) == 1
+    assert "If-None-Match" not in sent[0]
+    assert p.from_cache is False
+    assert p.title == "t"
+    assert p.to_dict()["parser"] == PARSER_VERSION
+
+
+def test_weak_etag_with_last_modified_sends_only_if_modified_since():
+    """Some CDNs never match weak ETags; If-None-Match would mask If-Modified-Since."""
+    stamp = "Wed, 18 Nov 2026 20:26:37 GMT"
+    site = FakeSite({BASE: page(etag='W/"1795033597-0"', last_modified=stamp)})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='W/"1795033597-0"', last_modified=stamp)})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    sent = site.headers_for(BASE)[0]
+    assert "If-None-Match" not in sent
+    assert sent["If-Modified-Since"] == stamp
+    assert p.from_cache is True
+
+
+def test_weak_etag_alone_is_still_sent():
+    site = FakeSite({BASE: page(etag='W/"v1"')})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='W/"v1"')})
+    [pg for pg, _, _ in c.crawl()]
+    assert site.headers_for(BASE)[0].get("If-None-Match") == 'W/"v1"'
+
+
+def test_strong_etag_is_sent_alongside_last_modified():
+    stamp = "Wed, 18 Nov 2026 20:26:37 GMT"
+    site = FakeSite({BASE: page(etag='"strong"', last_modified=stamp)})
+    c = _crawler(site, cached_pages={BASE: _cached(BASE, etag='"strong"', last_modified=stamp)})
+    [pg for pg, _, _ in c.crawl()]
+    sent = site.headers_for(BASE)[0]
+    assert sent.get("If-None-Match") == '"strong"' and sent.get("If-Modified-Since") == stamp
+
+
+def test_record_without_images_is_refetched_when_images_are_wanted():
+    site = FakeSite({BASE: page(etag='"v1"')})
+    rec = _cached(BASE, etag='"v1"')
+    rec["images_extracted"] = False
+    c = _crawler(site, cached_pages={BASE: rec})
+    p = [pg for pg, _, _ in c.crawl()][0]
+    assert "If-None-Match" not in site.headers_for(BASE)[0] and p.from_cache is False
+
+    site = FakeSite({BASE: page(etag='"v1"')})
+    c = _crawler(site, cached_pages={BASE: rec}, extract_images=False)
+    p = [pg for pg, _, _ in c.crawl()][0]
+    assert p.from_cache is True and p.images_extracted is False

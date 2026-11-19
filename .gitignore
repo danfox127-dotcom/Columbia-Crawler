@@ -8,3 +8,8 @@ __pycache__/
 .vscode/
 *.log
 crawl_output.jsonl
+
+# Python packaging (pyproject.toml)
+build/
+dist/
+*.egg-info/

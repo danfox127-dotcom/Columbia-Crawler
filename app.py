@@ -199,6 +199,12 @@ with st.sidebar:
                  "Crawl-delay overrides this when it asks for more, unless that's "
                  "switched off below.",
         )
+        extract_images_input = st.checkbox(
+            "Extract images", value=True,
+            help="Collect every image on each page, including lazy-loaded and responsive ones, "
+                 "for the alt-text checks. Untick for a slightly faster crawl when you don't "
+                 "need image issues.",
+        )
         honor_crawl_delay_input = st.checkbox(
             "Honor robots.txt Crawl-delay", value=True,
             help="Many Drupal sites ask for 10s between requests, which we cap at 1s — "
@@ -225,8 +231,9 @@ with st.sidebar:
         st.text_area(
             "Exclude paths (one per line)",
             key="exclude_paths_raw",
-            placeholder="/news/\n/events/\n/blog/",
-            help="Top-level folder names to skip, e.g. /news/",
+            placeholder="/news/\n/events/\n/health-library/*",
+            help="Folders to skip, e.g. /news/. End with /* to skip only what's under a folder "
+                 "and still crawl the folder's own page, e.g. /health-library/*.",
             height=100,
         )
         st.text_area(
@@ -319,6 +326,7 @@ if start_button:
                 max_depth=int(max_depth_input) if max_depth_input > 0 else None,
                 max_workers=int(max_workers_input),
                 honor_crawl_delay=honor_crawl_delay_input,
+                extract_images=extract_images_input,
                 cached_pages=cached_pages or None,
                 auth=site_creds,
             )

@@ -50,13 +50,23 @@ JSONL (JSON Lines): one JSON object per line. Line 1 is always a header object. 
 | `images` | array[object] | no | See image object below |
 | `load_time` | number | no | Seconds (3 decimal places), null = unknown |
 | `error` | string or null | no | Error message if fetch failed |
+| `etag` | string | no | `ETag` response header, used to revalidate on the next crawl |
+| `last_modified` | string | no | `Last-Modified` response header, used to revalidate on the next crawl |
+| `from_cache` | boolean | no | True if the server answered 304 and this record was reused from the previous export |
+| `parser` | integer | no | Version of the HTML extraction that produced this record (absent = 1). Records from an older parser are refetched in full instead of revalidated. |
+| `images_extracted` | boolean | no | `false` when the crawl ran with image extraction off (then `images` is empty). Absent = images were extracted. A later crawl that wants images refetches such records in full. |
 
 ### Image object
 
+One object per image element on the page (lazy-loaded and responsive images included).
+
 | Field | Type | Notes |
 |---|---|---|
-| `src` | string | Absolute image URL |
-| `alt` | string or null | `null` = attribute absent; `""` = explicitly empty |
+| `src` | string | Absolute image URL: the largest real candidate (lazy-load placeholders are ignored) |
+| `alt` | string or null | `null` = attribute absent; `""` = explicitly empty. Always `null` for CSS backgrounds |
+| `candidates` | array[string] | Optional. Every URL the element can load (`srcset`, `data-srcset`, `<picture><source>`, fallback `src`), when there is more than one |
+| `kind` | string | Optional; absent = `"img"`. `"picture"` (inside `<picture>`) or `"background"` (inline CSS `background-image` / `data-bg`) |
+| `location` | string | Optional. Innermost landmark containing the image: `header`, `nav`, `footer`, `main` or `aside` (tags or ARIA roles); absent when it's in none |
 
 ## Sitemap mode limitation
 
